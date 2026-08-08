@@ -7,19 +7,18 @@ import {
   type Channel,
   type Contact,
   type Draft,
-  type GoogleTokens,
   type Note,
-  type Project
+  type Project,
+  type Routine,
+  type RoutineSchedule
 } from './sakurun-types'
-import { createCalendarEvent, refreshGoogleToken, type CalendarEventInput } from '../integrations/google-calendar'
-import { createNotionPage } from '../integrations/notion'
 
 export type SakurunState = {
   contacts: Contact[]
   projects: Project[]
   drafts: Draft[]
   boardPosts: BoardPost[]
-  googleAuth: GoogleTokens | null
+  routines: Routine[]
 }
 
 // チャンネルの物理的なフォーマット指針のみコードに残す。
@@ -47,13 +46,35 @@ const DRAFT_RESPONSE_SCHEMA = {
 
 type DraftGenerationResult = { body: string; missingInfo: string[] }
 
+const TARGET_SELECTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    targets: {
+      type: 'array',
+      description: 'この状況を伝えるべき宛先。伝える必要がない相手は含めない。',
+      items: {
+        type: 'object',
+        properties: {
+          contactId: { type: 'string', description: '宛先一覧に示されたid' },
+          channel: { type: 'string', enum: ['email', 'line'], description: 'この宛先に適した送信手段' },
+          reason: { type: 'string', description: 'この宛先を選んだ理由（日本語で簡潔に）' }
+        },
+        required: ['contactId', 'channel', 'reason']
+      }
+    }
+  },
+  required: ['targets']
+}
+
+type TargetSelection = { contactId: string; channel: Channel; reason: string }
+
 export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
   initialState: SakurunState = {
     contacts: SEED_CONTACTS,
     projects: SEED_PROJECTS,
     drafts: [],
     boardPosts: [],
-    googleAuth: null
+    routines: []
   }
 
   @callable()
@@ -126,6 +147,73 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
   // --- 下書き生成 ---
   @callable()
   async draftMessage(projectId: string | null, contactId: string, channel: Channel, situation: string) {
+    return this.generateDraft(projectId, contactId, channel, situation, 'manual')
+  }
+
+  // 状況文から宛先をさくるんが判定して一括生成する（デフォルトの入り口）。
+  // 判定理由は各下書きに残し、人間が破棄・編集・確定で最終判断する。
+  @callable()
+  async draftAuto(projectId: string | null, situation: string) {
+    const contacts = this.state.contacts ?? []
+    const project = projectId ? (this.state.projects ?? []).find((p) => p.id === projectId) : undefined
+
+    const contactCatalog = contacts
+      .map(
+        (c) =>
+          `- id: ${c.id} / ${c.name}（${c.label}、${c.internal ? '内部' : '外部'}、既定: ${
+            CHANNEL_LABELS[c.defaultChannel]
+          }）: ${c.styleNotes}`
+      )
+      .join('\n')
+
+    const selectionPrompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
+以下の状況を、どの宛先に伝えるべきか判定してください。
+
+宛先一覧:
+${contactCatalog}
+
+${project ? `関連プロジェクト「${project.name}」のノート:\n${project.notes.map((n) => `- ${n.text}`).join('\n')}` : ''}
+
+状況: ${situation}
+
+この状況を伝える必要がある宛先だけをtargetsに含めてください。関係のない宛先を含めてはいけません。
+送信手段は各宛先の既定を基本とし、フォーマルさが必要な内容ならemailを選んでください。`
+
+    const result = await this.env.AI.run(MODEL, {
+      messages: [{ role: 'user', content: selectionPrompt }],
+      response_format: { type: 'json_schema', json_schema: TARGET_SELECTION_SCHEMA }
+    })
+
+    const raw =
+      typeof result === 'object' && result !== null && 'response' in result
+        ? (result as { response: unknown }).response
+        : result
+    const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { targets?: TargetSelection[] }
+    const validIds = new Set(contacts.map((c) => c.id))
+    const targets = (parsed.targets ?? []).filter((t) => validIds.has(t.contactId))
+
+    const drafts: Draft[] = []
+    for (const t of targets) {
+      const draft = await this.generateDraft(projectId, t.contactId, t.channel, situation, 'auto')
+      const withReason = { ...draft, selectionReason: t.reason }
+      this.setState({
+        ...this.state,
+        drafts: this.state.drafts.map((d) => (d.id === draft.id ? withReason : d))
+      })
+      drafts.push(withReason)
+    }
+
+    return { targets, drafts }
+  }
+
+  private async generateDraft(
+    projectId: string | null,
+    contactId: string,
+    channel: Channel,
+    situation: string,
+    source: 'manual' | 'routine' | 'auto',
+    routineName?: string
+  ) {
     const contact = (this.state.contacts ?? []).find((c) => c.id === contactId)
     if (!contact) throw new Error(`contact not found: ${contactId}`)
 
@@ -146,10 +234,8 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
         }`
       : '対象プロジェクト: 指定なし（サークル全般の連絡）'
 
-    const pastRetrospectives = (this.state.projects ?? [])
-      .filter((p) => p.retrospective && p.id !== projectId)
-      .map((p) => `- ${p.name}: ${p.retrospective}`)
-      .join('\n')
+    const retroProjects = (this.state.projects ?? []).filter((p) => p.retrospective && p.id !== projectId)
+    const pastRetrospectives = retroProjects.map((p) => `- ${p.name}: ${p.retrospective}`).join('\n')
 
     const prompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
 以下の状況について、宛先「${contact.name}」向け、送信手段「${CHANNEL_LABELS[channel]}」の連絡文を日本語で作成してください。
@@ -195,12 +281,100 @@ missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/�
       generatedText: parsed.body,
       editedText: parsed.body,
       missingInfo: parsed.missingInfo,
+      usedRetroProjects: retroProjects.map((p) => p.name),
+      source,
+      routineName,
       status: 'draft',
       postedToBoard: false
     }
 
     this.setState({ ...this.state, drafts: [...this.state.drafts, draft] })
     return draft
+  }
+
+  // --- 定例ワーク（routine） ---
+  @callable()
+  listRoutines() {
+    return this.state.routines ?? []
+  }
+
+  @callable()
+  async addRoutine(
+    name: string,
+    schedule: RoutineSchedule,
+    scheduleLabel: string,
+    contactIds: string[],
+    projectId: string | null,
+    situation: string
+  ) {
+    const routineId = crypto.randomUUID()
+
+    let scheduleId: string
+    if (schedule.kind === 'demoMinutely') {
+      const s = await this.scheduleEvery(60, 'runRoutine', routineId)
+      scheduleId = s.id
+    } else {
+      // Cloudflareのcron評価はUTCのため、JST（UTC+9）から変換する
+      const jstMinutes = schedule.hour * 60 + schedule.minute
+      const utcTotal = (jstMinutes - 9 * 60 + 24 * 60) % (24 * 60)
+      const utcHour = Math.floor(utcTotal / 60)
+      const utcMinute = utcTotal % 60
+      const dayShift = jstMinutes < 9 * 60 ? -1 : 0
+      const cron =
+        schedule.kind === 'daily'
+          ? `${utcMinute} ${utcHour} * * *`
+          : `${utcMinute} ${utcHour} * * ${(schedule.dayOfWeek + dayShift + 7) % 7}`
+      const s = await this.schedule(cron, 'runRoutine', routineId)
+      scheduleId = s.id
+    }
+
+    const routine: Routine = {
+      id: routineId,
+      name,
+      schedule,
+      scheduleLabel,
+      contactIds,
+      projectId,
+      situation,
+      scheduleId,
+      lastRunAt: null
+    }
+    this.setState({ ...this.state, routines: [...(this.state.routines ?? []), routine] })
+    return routine
+  }
+
+  @callable()
+  async deleteRoutine(routineId: string) {
+    const routine = (this.state.routines ?? []).find((r) => r.id === routineId)
+    if (!routine) return
+    await this.cancelSchedule(routine.scheduleId)
+    this.setState({ ...this.state, routines: (this.state.routines ?? []).filter((r) => r.id !== routineId) })
+  }
+
+  // スケジューラから呼ばれる。下書きの自動生成まで行い、確定は人間に委ねる
+  async runRoutine(routineId: string) {
+    const routine = (this.state.routines ?? []).find((r) => r.id === routineId)
+    if (!routine) return
+
+    for (const contactId of routine.contactIds) {
+      const contact = (this.state.contacts ?? []).find((c) => c.id === contactId)
+      if (!contact) continue
+      try {
+        await this.generateDraft(
+          routine.projectId,
+          contactId,
+          contact.defaultChannel,
+          routine.situation,
+          'routine',
+          routine.name
+        )
+      } catch (e) {
+        console.error(`routine ${routine.name}: draft generation failed for ${contact.name}`, e)
+      }
+    }
+
+    const routines = (this.state.routines ?? []).map((r) => (r.id === routineId ? { ...r, lastRunAt: Date.now() } : r))
+    this.setState({ ...this.state, routines })
   }
 
   private parseDraftResult(result: unknown): DraftGenerationResult {
@@ -299,44 +473,4 @@ ${confirmedDrafts || '（なし）'}
     return projects.find((p) => p.id === projectId)
   }
 
-  // --- Notion書き出し（プロジェクトの文脈・振り返りを長期保管） ---
-  @callable()
-  async exportProjectToNotion(projectId: string) {
-    const project = (this.state.projects ?? []).find((p) => p.id === projectId)
-    if (!project) throw new Error(`project not found: ${projectId}`)
-
-    const result = await createNotionPage(this.env, `さくるん: ${project.name}`, [
-      { heading: 'ノート', paragraphs: project.notes.length > 0 ? project.notes.map((n) => n.text) : ['（なし）'] },
-      { heading: '振り返り', paragraphs: [project.retrospective || '（未実施）'] }
-    ])
-
-    const projects = (this.state.projects ?? []).map((p) => (p.id === projectId ? { ...p, notionUrl: result.url } : p))
-    this.setState({ ...this.state, projects })
-    return result
-  }
-
-  // --- Google Calendar連携（ストレッチ） ---
-  // saveGoogleTokensはOAuthコールバック用のルート（src/index.tsx）からサーバー側で呼ぶ想定。
-  // クライアントから直接呼べないよう@callableは付けない。
-  saveGoogleTokens(tokens: GoogleTokens) {
-    this.setState({ ...this.state, googleAuth: tokens })
-  }
-
-  @callable()
-  getGoogleAuthStatus() {
-    return { connected: !!this.state.googleAuth }
-  }
-
-  @callable()
-  async createCalendarEvent(input: CalendarEventInput) {
-    let tokens = this.state.googleAuth
-    if (!tokens) {
-      throw new Error('Googleカレンダーが未接続です。/auth/google から連携してください。')
-    }
-    if (tokens.expiresAt < Date.now() + 60_000) {
-      tokens = await refreshGoogleToken(this.env, tokens.refreshToken)
-      this.setState({ ...this.state, googleAuth: tokens })
-    }
-    return createCalendarEvent(tokens.accessToken, input)
-  }
 }

@@ -33,7 +33,6 @@ export type Project = {
   name: string
   notes: Note[]
   retrospective: string
-  notionUrl?: string
 }
 
 export type Draft = {
@@ -49,8 +48,31 @@ export type Draft = {
   generatedText: string
   editedText: string
   missingInfo: string[]
+  usedRetroProjects: string[]
+  source: 'manual' | 'routine' | 'auto'
+  routineName?: string
+  selectionReason?: string
   status: 'draft' | 'confirmed'
   postedToBoard: boolean
+}
+
+// 定例ワーク。scheduleSpecの内容でAgents SDKのスケジュールを張り、
+// 発火時に下書きを自動生成する（確定は人間が行う）
+export type RoutineSchedule =
+  | { kind: 'demoMinutely' }
+  | { kind: 'daily'; hour: number; minute: number }
+  | { kind: 'weekly'; dayOfWeek: number; hour: number; minute: number }
+
+export type Routine = {
+  id: string
+  name: string
+  schedule: RoutineSchedule
+  scheduleLabel: string
+  contactIds: string[]
+  projectId: string | null
+  situation: string
+  scheduleId: string
+  lastRunAt: number | null
 }
 
 export type BoardPost = {
@@ -68,9 +90,3 @@ export const CHANNEL_LABELS: Record<Channel, string> = {
 }
 
 export const SAKURUN_INSTANCE_NAME = 'default'
-
-export type GoogleTokens = {
-  accessToken: string
-  refreshToken: string
-  expiresAt: number
-}

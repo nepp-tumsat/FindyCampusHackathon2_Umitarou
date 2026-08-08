@@ -45,6 +45,19 @@ export const SEED_CONTACTS: Contact[] = [
 
 export const SEED_PROJECTS: Project[] = [
   {
+    id: 'p0',
+    name: 'サークル全般',
+    notes: [
+      {
+        id: 'n0',
+        text: '通常活動は毎週土曜14:00〜17:00、大学の第2会議室。プログラミングの勉強会と開発作業が中心。',
+        createdAt: 0,
+        updatedAt: 0
+      }
+    ],
+    retrospective: ''
+  },
+  {
     id: 'p1',
     name: '大学間合同ハッカソン',
     notes: [
