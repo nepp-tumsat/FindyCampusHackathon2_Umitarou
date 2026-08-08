@@ -109,8 +109,9 @@ function ConsultTab({ agent, state, goToDrafts }: TabProps & { goToDrafts: () =>
     }
   }
 
-  const handleSuggestion = async (s: DraftSuggestion) => {
-    setSuggestionLoading(s.description)
+  const handleSuggestion = async (key: string, s: DraftSuggestion) => {
+    if (suggestionLoading !== null) return
+    setSuggestionLoading(key)
     try {
       await agent.stub.draftAuto(s.projectId, s.situation)
       goToDrafts()
@@ -138,17 +139,20 @@ function ConsultTab({ agent, state, goToDrafts }: TabProps & { goToDrafts: () =>
               <p className="chat-text">{m.text}</p>
               {m.suggestions.length > 0 && (
                 <div className="chat-suggestions">
-                  {m.suggestions.map((s, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      className="btn btn-ghost suggestion-btn"
-                      onClick={() => handleSuggestion(s)}
-                      disabled={suggestionLoading !== null}
-                    >
-                      {suggestionLoading === s.description ? '下書きを作成中...' : `✎ ${s.description}`}
-                    </button>
-                  ))}
+                  {m.suggestions.map((s, i) => {
+                    const key = `${m.id}:${i}`
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className="btn btn-ghost suggestion-btn"
+                        onClick={() => handleSuggestion(key, s)}
+                        disabled={suggestionLoading !== null}
+                      >
+                        {suggestionLoading === key ? '下書きを作成中...' : `✎ ${s.description}`}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
