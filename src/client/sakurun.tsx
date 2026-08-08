@@ -57,120 +57,171 @@ export function SakurunWidget() {
   }
 
   return (
-    <div>
-      <h2>さくるん（動作確認用の簡易モック — 本UIは別途実装予定）</h2>
+    <div className="app-shell">
+      <header className="app-header">
+        <h1>さくるん</h1>
+        <p className="tagline">サークルの運営に伴走してくれるAIエージェントツール</p>
+      </header>
 
-      <section>
-        <h3>メンバー（モックデータ）</h3>
-        <ul>
+      <section className="card">
+        <h2>
+          メンバー <span className="muted-suffix">（モックデータ）</span>
+        </h2>
+        <ul className="member-list">
           {MEMBERS.map((m) => (
-            <li key={m.id}>
-              {m.name}（{m.grade}・{m.role}、参加率{m.participationRate}%、参加不可:{' '}
-              {m.unavailableDays.join('・') || 'なし'}）
+            <li key={m.id} className="member-chip">
+              {m.name} ／ {m.grade}・{m.role} ／ 参加率<span className="rate">{m.participationRate}%</span>
             </li>
           ))}
         </ul>
       </section>
 
-      <section>
-        <h3>下書き作成</h3>
-        <select value={recipientType} onChange={(e) => setRecipientType(e.target.value as RecipientType)}>
+      <section className="card">
+        <h2>さくるんに頼む</h2>
+        <div className="recipient-tabs">
           {RECIPIENT_TYPES.map((rt) => (
-            <option key={rt} value={rt}>
+            <button
+              key={rt}
+              type="button"
+              className={`recipient-tab${rt === recipientType ? ' active' : ''}`}
+              onClick={() => setRecipientType(rt)}
+            >
               {RECIPIENT_LABELS[rt]}
-            </option>
+            </button>
           ))}
-        </select>
-        <br />
-        <textarea
-          value={situation}
-          onChange={(e) => setSituation(e.target.value)}
-          placeholder="状況を入力（例：デザイン担当の子にポスター作成をお願いしたい）"
-          rows={3}
-          cols={60}
-        />
-        <br />
-        <button onClick={handleGenerate} disabled={loading}>
-          {loading ? '生成中...' : '下書き生成'}
-        </button>
+        </div>
+        <div className="field">
+          <textarea
+            value={situation}
+            onChange={(e) => setSituation(e.target.value)}
+            placeholder="状況を入力（例：デザイン担当の子にポスター作成をお願いしたい）"
+            rows={3}
+          />
+        </div>
+        <div className="actions-row">
+          <button className="btn btn-primary" onClick={handleGenerate} disabled={loading || !situation.trim()}>
+            {loading ? '生成中...' : '下書き生成'}
+          </button>
+        </div>
       </section>
 
-      <section>
-        <h3>下書き一覧</h3>
-        {state.drafts.length === 0 && <p>まだ下書きはありません</p>}
-        {state.drafts.map((d) => (
-          <div key={d.id} style={{ border: '1px solid #ccc', margin: '8px 0', padding: '8px' }}>
-            <p>
-              宛先: {RECIPIENT_LABELS[d.recipientType]} / 状態: {d.status === 'confirmed' ? '確定済み' : '下書き'}
-            </p>
-            <textarea
-              defaultValue={d.editedText}
-              onBlur={(e) => agent.stub.updateDraft(d.id, e.target.value)}
-              rows={4}
-              cols={60}
-              disabled={d.status === 'confirmed'}
-            />
-            <br />
-            {d.status === 'draft' && <button onClick={() => agent.stub.confirmDraft(d.id)}>確定</button>}
+      <section className="card">
+        <h2>下書き一覧</h2>
+        {state.drafts.length === 0 && <p className="empty-state">まだ下書きはありません</p>}
+        <div className="draft-list">
+          {state.drafts
+            .slice()
+            .reverse()
+            .map((d) => (
+              <div key={d.id} className="draft-card">
+                <div className="draft-card-header">
+                  <span className={`badge badge-${d.recipientType}`}>{RECIPIENT_LABELS[d.recipientType]}</span>
+                  <span className={`status-badge${d.status === 'confirmed' ? ' confirmed' : ''}`}>
+                    {d.status === 'confirmed' ? '確定済み' : '下書き（編集できます）'}
+                  </span>
+                </div>
+                <div className="field">
+                  <textarea
+                    defaultValue={d.editedText}
+                    onBlur={(e) => agent.stub.updateDraft(d.id, e.target.value)}
+                    rows={4}
+                    disabled={d.status === 'confirmed'}
+                  />
+                </div>
+                {d.status === 'draft' && (
+                  <div className="actions-row">
+                    <button className="btn btn-primary" onClick={() => agent.stub.confirmDraft(d.id)}>
+                      確定して送る
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>掲示板</h2>
+        {state.boardPosts.length === 0 && <p className="empty-state">まだ投稿はありません</p>}
+        <ul className="board-list">
+          {state.boardPosts
+            .slice()
+            .reverse()
+            .map((p) => (
+              <li key={p.id} className="board-item">
+                <span className={`badge badge-${p.recipientType}`}>{RECIPIENT_LABELS[p.recipientType]}</span>{' '}
+                {p.text}
+              </li>
+            ))}
+        </ul>
+      </section>
+
+      <section className="card">
+        <h2>
+          外部連携 <span className="muted-suffix">（ストレッチ）</span>
+        </h2>
+        <div className="stretch-grid">
+          <div className="stretch-card">
+            <h3>Googleカレンダー</h3>
+            <div className="connection-status">
+              <span className={`dot${googleConnected ? ' connected' : ''}`} />
+              {googleConnected ? '接続済み' : '未接続'}
+            </div>
+            {!googleConnected && (
+              <div>
+                <a className="btn btn-ghost" href="/auth/google">
+                  連携する
+                </a>
+              </div>
+            )}
           </div>
-        ))}
-      </section>
 
-      <section>
-        <h3>掲示板（内部宛の確定分が反映される）</h3>
-        {state.boardPosts.length === 0 && <p>まだ投稿はありません</p>}
-        <ul>
-          {state.boardPosts.map((p) => (
-            <li key={p.id}>
-              [{RECIPIENT_LABELS[p.recipientType]}] {p.text}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section>
-        <h3>Googleカレンダー連携（ストレッチ・土台のみ）</h3>
-        <p>接続状態: {googleConnected ? '接続済み' : '未接続'}</p>
-        {!googleConnected && <a href="/auth/google">Googleカレンダーと連携する</a>}
-      </section>
-
-      <section>
-        <h3>引き継ぎ文書 → Notion保存（ストレッチ・土台のみ）</h3>
-        <input
-          value={handoverTitle}
-          onChange={(e) => setHandoverTitle(e.target.value)}
-          placeholder="タイトル（例：2026年度 引き継ぎ）"
-          style={{ width: '100%' }}
-        />
-        <br />
-        <textarea
-          value={handoverContent}
-          onChange={(e) => setHandoverContent(e.target.value)}
-          placeholder="引き継ぎ内容"
-          rows={3}
-          cols={60}
-        />
-        <br />
-        <button onClick={handleSaveHandoverDoc} disabled={savingHandover}>
-          {savingHandover ? '保存中...' : 'Notionに保存'}
-        </button>
-        {handoverError && <p style={{ color: 'red' }}>{handoverError}</p>}
-        <ul>
-          {(state.handoverDocs ?? []).map((d) => (
-            <li key={d.id}>
-              {d.title}
-              {d.notionUrl && (
-                <>
-                  {' '}
-                  —{' '}
-                  <a href={d.notionUrl} target="_blank" rel="noreferrer">
-                    Notionで開く
-                  </a>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
+          <div className="stretch-card">
+            <h3>Notion（引き継ぎ文書）</h3>
+            <div className="field">
+              <input
+                type="text"
+                value={handoverTitle}
+                onChange={(e) => setHandoverTitle(e.target.value)}
+                placeholder="タイトル（例：2026年度 引き継ぎ）"
+              />
+            </div>
+            <div className="field" style={{ marginTop: 8 }}>
+              <textarea
+                value={handoverContent}
+                onChange={(e) => setHandoverContent(e.target.value)}
+                placeholder="引き継ぎ内容"
+                rows={3}
+              />
+            </div>
+            <div className="actions-row">
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveHandoverDoc}
+                disabled={savingHandover || !handoverTitle.trim() || !handoverContent.trim()}
+              >
+                {savingHandover ? '保存中...' : 'Notionに保存'}
+              </button>
+            </div>
+            {handoverError && <p className="error-text">{handoverError}</p>}
+            <ul className="handover-list">
+              {(state.handoverDocs ?? []).map((d) => (
+                <li key={d.id}>
+                  {d.title}
+                  {d.notionUrl && (
+                    <>
+                      {' '}
+                      —{' '}
+                      <a href={d.notionUrl} target="_blank" rel="noreferrer">
+                        Notionで開く
+                      </a>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </section>
     </div>
   )
