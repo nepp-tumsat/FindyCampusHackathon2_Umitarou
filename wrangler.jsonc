@@ -9,13 +9,17 @@
       {
         "name": "CounterAgent",
         "class_name": "CounterAgent"
+      },
+      {
+        "name": "MagiAgent",
+        "class_name": "MagiAgent"
       }
     ]
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["CounterAgent"]
+      "new_sqlite_classes": ["CounterAgent", "MagiAgent"]
     }
   ]
 }

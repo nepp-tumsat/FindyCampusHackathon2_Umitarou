@@ -3,6 +3,7 @@ import { agentsMiddleware } from 'hono-agents'
 import { renderToReadableStream } from 'react-dom/server'
 import { Script, Link, ViteClient, ReactRefresh } from 'vite-ssr-components/react'
 export { CounterAgent } from './agents/counter'
+export { MagiAgent } from './agents/magi'
 
 const app = new Hono<{ Bindings: CloudflareBindings }>()
 

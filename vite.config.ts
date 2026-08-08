@@ -8,6 +8,13 @@ export default defineConfig({
   build: {
     minify: true
   },
+  // WSL上の/mnt/c配下ではファイルシステムの変更通知が届かずHMRが効かないため、pollingに切り替える
+  server: {
+    watch: {
+      usePolling: true,
+      interval: 300
+    }
+  },
   plugins: [
     agents(),
     cloudflare(),
