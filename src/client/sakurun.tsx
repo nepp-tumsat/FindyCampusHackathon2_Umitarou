@@ -7,28 +7,31 @@ import {
   RECIPIENT_LABELS,
   SAKURUN_INSTANCE_NAME,
   type Channel,
-  type RecipientType
+  type Contact
 } from '../agents/sakurun-types'
 import { MEMBERS } from '../data/members'
 
-const RECIPIENT_TYPES = Object.keys(RECIPIENT_LABELS) as RecipientType[]
 const CHANNELS = Object.keys(CHANNEL_LABELS) as Channel[]
 
-const EMPTY_STATE: SakurunState = { drafts: [], boardPosts: [], googleAuth: null, handoverDocs: [] }
-
-type Target = { recipientType: RecipientType; channel: Channel }
-
-function targetKey(t: Target) {
-  return `${t.recipientType}:${t.channel}`
+const EMPTY_STATE: SakurunState = {
+  contacts: [],
+  events: [],
+  drafts: [],
+  boardPosts: [],
+  googleAuth: null,
+  handoverDocs: []
 }
+
+type Selection = { enabled: boolean; channel: Channel }
 
 export function SakurunWidget() {
   const [state, setState] = useState<SakurunState>(EMPTY_STATE)
-  const [recipientType, setRecipientType] = useState<RecipientType>('member')
-  const [channel, setChannel] = useState<Channel>('line')
-  const [targets, setTargets] = useState<Target[]>([])
+  const [selections, setSelections] = useState<Record<string, Selection>>({})
   const [situation, setSituation] = useState('')
   const [loading, setLoading] = useState(false)
+  const [eventTitle, setEventTitle] = useState('')
+  const [eventDate, setEventDate] = useState('')
+  const [eventDetails, setEventDetails] = useState('')
   const [googleConnected, setGoogleConnected] = useState(false)
   const [handoverTitle, setHandoverTitle] = useState('')
   const [handoverContent, setHandoverContent] = useState('')
@@ -45,23 +48,36 @@ export function SakurunWidget() {
     agent.stub.getGoogleAuthStatus().then((s) => setGoogleConnected(s.connected))
   }, [agent])
 
-  const handleAddTarget = () => {
-    const next: Target = { recipientType, channel }
-    setTargets((prev) => (prev.some((t) => targetKey(t) === targetKey(next)) ? prev : [...prev, next]))
+  const selectionFor = (c: Contact): Selection => selections[c.id] ?? { enabled: false, channel: c.defaultChannel }
+
+  const toggleEnabled = (c: Contact) => {
+    const cur = selectionFor(c)
+    setSelections((prev) => ({ ...prev, [c.id]: { ...cur, enabled: !cur.enabled } }))
   }
 
-  const handleRemoveTarget = (key: string) => {
-    setTargets((prev) => prev.filter((t) => targetKey(t) !== key))
+  const setChannelFor = (c: Contact, channel: Channel) => {
+    const cur = selectionFor(c)
+    setSelections((prev) => ({ ...prev, [c.id]: { ...cur, channel } }))
   }
+
+  const targets = (state.contacts ?? []).filter((c) => selectionFor(c).enabled)
 
   const handleGenerate = async () => {
     if (!situation.trim() || targets.length === 0) return
     setLoading(true)
     try {
-      await Promise.all(targets.map((t) => agent.stub.draftMessage(t.recipientType, t.channel, situation)))
+      await Promise.all(targets.map((c) => agent.stub.draftMessage(c.id, selectionFor(c).channel, situation)))
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleAddEvent = async () => {
+    if (!eventTitle.trim() || !eventDetails.trim()) return
+    await agent.stub.addEvent(eventTitle, eventDate, eventDetails)
+    setEventTitle('')
+    setEventDate('')
+    setEventDetails('')
   }
 
   const handleSaveHandoverDoc = async () => {
@@ -100,57 +116,80 @@ export function SakurunWidget() {
       </section>
 
       <section className="card">
+        <h2>イベント情報</h2>
+        <p className="section-hint">
+          ここに蓄積した情報を、さくるんが文脈として読み取って文面に反映します（日付・会場・協賛などを推測せず事実で書けるようになります）。
+        </p>
+        <ul className="event-list">
+          {(state.events ?? []).map((e) => (
+            <li key={e.id} className="event-item">
+              <span className="event-title">{e.title}</span>
+              {e.date && <span className="event-date">{e.date}</span>}
+              <p className="event-details">{e.details}</p>
+            </li>
+          ))}
+        </ul>
+        <div className="event-form">
+          <div className="event-form-row">
+            <input
+              type="text"
+              value={eventTitle}
+              onChange={(e) => setEventTitle(e.target.value)}
+              placeholder="イベント名（例：新歓BBQ）"
+            />
+            <input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+          </div>
+          <textarea
+            value={eventDetails}
+            onChange={(e) => setEventDetails(e.target.value)}
+            placeholder="詳細（会場、参加者、決定事項、金額など）"
+            rows={2}
+          />
+          <div className="actions-row">
+            <button
+              className="btn btn-ghost"
+              onClick={handleAddEvent}
+              disabled={!eventTitle.trim() || !eventDetails.trim()}
+            >
+              + イベント情報を追加
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="card">
         <h2>連絡文の下書きを作る</h2>
         <p className="section-hint">
-          同じ状況でも、宛先ごとに言い方は変わるはず。宛先を複数追加して、状況を1回書くだけでまとめて下書きできます。
+          送る相手にチェックを入れ、それぞれメール/LINEを選んでから、状況を1回書くだけでまとめて下書きできます。
         </p>
 
-        <div className="recipient-tabs">
-          {RECIPIENT_TYPES.map((rt) => (
-            <button
-              key={rt}
-              type="button"
-              className={`recipient-tab${rt === recipientType ? ' active' : ''}`}
-              onClick={() => setRecipientType(rt)}
-            >
-              {RECIPIENT_LABELS[rt]}
-            </button>
-          ))}
-        </div>
-        <div className="channel-toggle">
-          {CHANNELS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={`channel-tab${c === channel ? ' active' : ''}`}
-              onClick={() => setChannel(c)}
-            >
-              {CHANNEL_LABELS[c]}
-            </button>
-          ))}
-        </div>
-        <div className="actions-row actions-row-start">
-          <button type="button" className="btn btn-ghost" onClick={handleAddTarget}>
-            + この宛先を追加
-          </button>
-        </div>
-
-        <div className="target-list">
-          {targets.length === 0 && <p className="empty-state">まだ宛先が追加されていません</p>}
-          {targets.map((t) => (
-            <span key={targetKey(t)} className="target-chip">
-              <span className={`badge badge-${t.recipientType}`}>{RECIPIENT_LABELS[t.recipientType]}</span>
-              <span className="badge badge-channel">{CHANNEL_LABELS[t.channel]}</span>
-              <button
-                type="button"
-                className="target-chip-remove"
-                onClick={() => handleRemoveTarget(targetKey(t))}
-                aria-label="削除"
-              >
-                ×
-              </button>
-            </span>
-          ))}
+        <div className="target-checklist">
+          {(state.contacts ?? []).map((c) => {
+            const sel = selectionFor(c)
+            return (
+              <div key={c.id} className={`target-row${sel.enabled ? ' enabled' : ''}`}>
+                <label className="target-row-label">
+                  <input type="checkbox" checked={sel.enabled} onChange={() => toggleEnabled(c)} />
+                  <span>
+                    {c.name}
+                    <span className={`badge badge-${c.recipientType}`}>{RECIPIENT_LABELS[c.recipientType]}</span>
+                  </span>
+                </label>
+                <div className="channel-toggle channel-toggle-inline">
+                  {CHANNELS.map((ch) => (
+                    <button
+                      key={ch}
+                      type="button"
+                      className={`channel-tab${sel.channel === ch ? ' active' : ''}`}
+                      onClick={() => setChannelFor(c, ch)}
+                    >
+                      {CHANNEL_LABELS[ch]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
 
         <div className="field" style={{ marginTop: 12 }}>
@@ -183,6 +222,7 @@ export function SakurunWidget() {
               <div key={d.id} className="draft-card">
                 <div className="draft-card-header">
                   <span>
+                    <strong>{d.contactName}</strong>{' '}
                     <span className={`badge badge-${d.recipientType}`}>{RECIPIENT_LABELS[d.recipientType]}</span>{' '}
                     <span className="badge badge-channel">{CHANNEL_LABELS[d.channel]}</span>
                   </span>
@@ -198,6 +238,16 @@ export function SakurunWidget() {
                     disabled={d.status === 'confirmed'}
                   />
                 </div>
+                {(d.missingInfo ?? []).length > 0 && (
+                  <div className="missing-info">
+                    <p className="missing-info-title">送る前に確認：不足していそうな情報</p>
+                    <ul>
+                      {(d.missingInfo ?? []).map((m, i) => (
+                        <li key={i}>{m}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {d.status === 'draft' && (
                   <div className="actions-row">
                     <button className="btn btn-primary" onClick={() => agent.stub.confirmDraft(d.id)}>

@@ -1,10 +1,13 @@
 import { Agent, callable } from 'agents'
 import { MEMBERS } from '../data/members'
+import { SEED_CONTACTS, SEED_EVENTS } from '../data/seed'
 import {
   CHANNEL_LABELS,
   RECIPIENT_LABELS,
   type BoardPost,
   type Channel,
+  type CircleEvent,
+  type Contact,
   type Draft,
   type GoogleTokens,
   type HandoverDoc,
@@ -14,6 +17,8 @@ import { createCalendarEvent, refreshGoogleToken, type CalendarEventInput } from
 import { createNotionHandoverPage } from '../integrations/notion'
 
 export type SakurunState = {
+  contacts: Contact[]
+  events: CircleEvent[]
   drafts: Draft[]
   boardPosts: BoardPost[]
   googleAuth: GoogleTokens | null
@@ -37,16 +42,69 @@ const INTERNAL_RECIPIENTS: RecipientType[] = ['executive', 'member', 'taskAssign
 
 const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
 
+const DRAFT_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    body: { type: 'string', description: '生成した連絡文の本文' },
+    missingInfo: {
+      type: 'array',
+      description:
+        '状況説明・蓄積情報に対して5W1H（誰が/何を/いつ/どこで/なぜ/どのように）の観点で不足・曖昧な点があれば日本語の短い箇条書きで列挙する。十分な場合は空配列。',
+      items: { type: 'string' }
+    }
+  },
+  required: ['body', 'missingInfo']
+}
+
+type DraftGenerationResult = { body: string; missingInfo: string[] }
+
 export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
-  initialState: SakurunState = { drafts: [], boardPosts: [], googleAuth: null, handoverDocs: [] }
+  initialState: SakurunState = {
+    contacts: SEED_CONTACTS,
+    events: SEED_EVENTS,
+    drafts: [],
+    boardPosts: [],
+    googleAuth: null,
+    handoverDocs: []
+  }
 
   @callable()
   listMembers() {
     return MEMBERS
   }
 
+  // --- 宛先マスタ ---
   @callable()
-  async draftMessage(recipientType: RecipientType, channel: Channel, situation: string) {
+  listContacts() {
+    return this.state.contacts ?? []
+  }
+
+  @callable()
+  addContact(name: string, recipientType: RecipientType, defaultChannel: Channel, notes: string) {
+    const contact: Contact = { id: crypto.randomUUID(), name, recipientType, defaultChannel, notes }
+    this.setState({ ...this.state, contacts: [...(this.state.contacts ?? []), contact] })
+    return contact
+  }
+
+  // --- イベント情報の蓄積（ドメイン知識ストア） ---
+  @callable()
+  listEvents() {
+    return this.state.events ?? []
+  }
+
+  @callable()
+  addEvent(title: string, date: string, details: string) {
+    const event: CircleEvent = { id: crypto.randomUUID(), title, date, details, createdAt: Date.now() }
+    this.setState({ ...this.state, events: [...(this.state.events ?? []), event] })
+    return event
+  }
+
+  // --- 下書き生成 ---
+  @callable()
+  async draftMessage(contactId: string, channel: Channel, situation: string) {
+    const contact = (this.state.contacts ?? []).find((c) => c.id === contactId)
+    if (!contact) throw new Error(`contact not found: ${contactId}`)
+
     const memberSummary = MEMBERS.map(
       (m) =>
         `- ${m.name}（${m.grade}・${m.role}、参加率${m.participationRate}%、参加不可: ${
@@ -54,38 +112,73 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
         }）`
     ).join('\n')
 
-    const prompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
-以下の状況について、宛先「${RECIPIENT_LABELS[recipientType]}」向け、送信手段「${CHANNEL_LABELS[channel]}」の連絡文を日本語で作成してください。
+    // データ量が少ない前提でイベント情報は全件注入し、LLMに関連箇所を拾わせる。
+    // 蓄積が増えたらここをVectorize等の検索に差し替える。
+    const eventSummary = (this.state.events ?? [])
+      .map((e) => `- ${e.title}（${e.date}）: ${e.details}`)
+      .join('\n')
 
-トーン（宛先による丁寧さ）の指針: ${RECIPIENT_TONE_GUIDE[recipientType]}
+    const prompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
+以下の状況について、宛先「${contact.name}」向け、送信手段「${CHANNEL_LABELS[channel]}」の連絡文を日本語で作成してください。
+
+宛先の情報:
+- 分類: ${RECIPIENT_LABELS[contact.recipientType]}
+- 関係性メモ: ${contact.notes || 'なし'}
+
+トーン（宛先による丁寧さ）の指針: ${RECIPIENT_TONE_GUIDE[contact.recipientType]}
 フォーマット（送信手段による構成）の指針: ${CHANNEL_STYLE_GUIDE[channel]}
+
+サークルの蓄積情報（イベント）— 状況に関係するものだけを文脈として使うこと:
+${eventSummary || '（まだ登録なし）'}
 
 参考情報（メンバーデータ）:
 ${memberSummary}
 
 状況: ${situation}
 
-本文のみを出力してください。前置きや説明は不要です。`
+bodyには本文のみ（前置きや説明は不要）を書いてください。蓄積情報に日付や会場などの事実があれば、推測せずそれを使ってください。
+missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/どこで/なぜ/どのように）の観点で見たときに、
+不足・曖昧なため本文中で断定・具体化できなかった点を、日本語の短い箇条書きで列挙してください。
+十分な場合は空配列にしてください。`
 
     const result = await this.env.AI.run(MODEL, {
-      messages: [{ role: 'user', content: prompt }]
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_schema', json_schema: DRAFT_RESPONSE_SCHEMA }
     })
 
-    const generatedText = typeof result === 'string' ? result : (result.response ?? '')
+    const parsed = this.parseDraftResult(result)
 
     const draft: Draft = {
       id: crypto.randomUUID(),
-      recipientType,
+      contactId: contact.id,
+      contactName: contact.name,
+      recipientType: contact.recipientType,
       channel,
       situation,
-      generatedText,
-      editedText: generatedText,
+      generatedText: parsed.body,
+      editedText: parsed.body,
+      missingInfo: parsed.missingInfo,
       status: 'draft',
       postedToBoard: false
     }
 
     this.setState({ ...this.state, drafts: [...this.state.drafts, draft] })
     return draft
+  }
+
+  private parseDraftResult(result: unknown): DraftGenerationResult {
+    const raw = typeof result === 'object' && result !== null && 'response' in result ? (result as { response: unknown }).response : result
+
+    const obj = typeof raw === 'string' ? JSON.parse(raw) : raw
+
+    if (obj && typeof obj === 'object' && 'body' in obj) {
+      const body = String((obj as { body: unknown }).body ?? '')
+      const missingInfoRaw = (obj as { missingInfo?: unknown }).missingInfo
+      const missingInfo = Array.isArray(missingInfoRaw) ? missingInfoRaw.map((m) => String(m)) : []
+      return { body, missingInfo }
+    }
+
+    return { body: typeof raw === 'string' ? raw : '', missingInfo: [] }
   }
 
   @callable()
@@ -108,6 +201,7 @@ ${memberSummary}
           ...this.state.boardPosts,
           {
             id: crypto.randomUUID(),
+            contactName: target.contactName,
             recipientType: target.recipientType,
             channel: target.channel,
             text: target.editedText,
@@ -118,7 +212,7 @@ ${memberSummary}
 
     const drafts = this.state.drafts.map((d) => (d.id === draftId ? confirmed : d))
 
-    this.setState({ drafts, boardPosts })
+    this.setState({ ...this.state, drafts, boardPosts })
     return { draft: confirmed, postedToBoard: isInternal }
   }
 

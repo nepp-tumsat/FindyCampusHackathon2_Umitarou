@@ -11,19 +11,39 @@ export type Member = {
   unavailableDays: string[]
 }
 
+export type Contact = {
+  id: string
+  name: string
+  recipientType: RecipientType
+  defaultChannel: Channel
+  notes: string
+}
+
+export type CircleEvent = {
+  id: string
+  title: string
+  date: string
+  details: string
+  createdAt: number
+}
+
 export type Draft = {
   id: string
+  contactId: string
+  contactName: string
   recipientType: RecipientType
   channel: Channel
   situation: string
   generatedText: string
   editedText: string
+  missingInfo: string[]
   status: 'draft' | 'confirmed'
   postedToBoard: boolean
 }
 
 export type BoardPost = {
   id: string
+  contactName: string
   recipientType: RecipientType
   channel: Channel
   text: string
