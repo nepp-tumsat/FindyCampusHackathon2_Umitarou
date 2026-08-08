@@ -16,6 +16,10 @@
       {
         "name": "SakurunAgent",
         "class_name": "SakurunAgent"
+      },
+      {
+        "name": "MagiAgent",
+        "class_name": "MagiAgent"
       }
     ]
   },
@@ -27,6 +31,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["SakurunAgent"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["MagiAgent"]
     }
   ]
 }

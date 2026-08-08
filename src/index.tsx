@@ -4,6 +4,7 @@ import { renderToReadableStream } from 'react-dom/server'
 import { Script, Link, ViteClient, ReactRefresh } from 'vite-ssr-components/react'
 export { CounterAgent } from './agents/counter'
 export { SakurunAgent } from './agents/sakurun'
+export { MagiAgent } from './agents/magi'
 
 const app = new Hono<{ Bindings: CloudflareBindings }>()
 
@@ -15,6 +16,7 @@ app.get('/', async (c) => {
     await renderToReadableStream(
       <html>
         <head>
+          <meta charSet="utf-8" />
           <ViteClient />
           <ReactRefresh />
           <Script src="/src/client/index.tsx" />

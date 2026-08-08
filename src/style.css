@@ -151,6 +151,17 @@ body {
   color: var(--color-text-muted);
 }
 
+.magi-link {
+  margin-left: 12px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--color-text-muted);
+}
+
+.magi-link:hover {
+  color: var(--color-primary-dark);
+}
+
 .field-label {
   font-size: 0.82rem;
   font-weight: 600;
@@ -864,3 +875,611 @@ body {
   margin: 8px 0;
 }
 
+
+/* ============================================================
+   MAGI（幹部専用の裏ページ #magi）のスタイル
+   feature/magi-decision-supportから取り込み。ダークテーマのため
+   bodyはbody.magi-mode、buttonは.magi-appスコープに変換済み
+   ============================================================ */
+:root {
+  --magi-bg: #08090a;
+  --magi-panel: #101214;
+  --magi-panel-alt: #16191c;
+  --magi-line: #3d2c1a;
+  --magi-line-bright: #a86a2e;
+  --magi-orange: #ff8c2e;
+  --magi-orange-soft: #e0a05a;
+  --magi-text: #f2ecdf;
+  --magi-text-dim: #b6ad9d;
+  --magi-text-faint: #756c5e;
+  --magi-good: #5fd996;
+  --magi-bad: #ff6259;
+  --magi-font-ui: -apple-system, BlinkMacSystemFont, 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP',
+    'Segoe UI', sans-serif;
+  --magi-font-mono: 'Cascadia Code', 'SF Mono', Consolas, 'Courier New', monospace;
+}
+
+body.magi-mode {
+  font-family: var(--magi-font-ui);
+  background: var(--magi-bg);
+  color: var(--magi-text);
+  margin: 0;
+  line-height: 1.7;
+}
+
+.magi-app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 20px 80px;
+}
+
+/* ---------- header ---------- */
+
+.magi-header h1 {
+  margin: 0;
+  font-family: var(--magi-font-ui);
+  font-size: 2.6rem;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  color: var(--magi-orange);
+  text-shadow: 0 0 24px rgba(255, 140, 46, 0.35);
+}
+
+.magi-header p {
+  color: var(--magi-text-faint);
+  font-family: var(--magi-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  margin: 10px 0 0;
+}
+
+.magi-hazard {
+  height: 4px;
+  margin: 18px 0 0;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--magi-orange) 0,
+    var(--magi-orange) 14px,
+    transparent 14px,
+    transparent 24px
+  );
+  opacity: 0.7;
+  border-bottom: 1px solid var(--magi-line);
+  padding-bottom: 1px;
+}
+
+.magi-main section {
+  margin-top: 32px;
+}
+
+/* ---------- panel frame (shared by major blocks) ---------- */
+
+.magi-form,
+.magi-persona-settings,
+.magi-verdict,
+.magi-history,
+.magi-terminal,
+.magi-history-item {
+  background: var(--magi-panel);
+  border: 1px solid var(--magi-line);
+  border-left: 3px solid var(--magi-orange-soft);
+  clip-path: polygon(18px 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%, 0 18px);
+  padding: 22px 24px;
+  filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.55));
+}
+
+/* ---------- forms ---------- */
+
+.magi-form label,
+.magi-persona-edit,
+.magi-decision label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 0.82rem;
+  color: var(--magi-text-dim);
+  margin-bottom: 14px;
+}
+
+.magi-form textarea,
+.magi-form input,
+.magi-persona-edit input,
+.magi-persona-edit textarea,
+.magi-decision textarea {
+  font: inherit;
+  font-size: 0.92rem;
+  background: var(--magi-panel-alt);
+  color: var(--magi-text);
+  border: 1px solid var(--magi-line);
+  border-radius: 2px;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.magi-form textarea:focus,
+.magi-form input:focus,
+.magi-persona-edit input:focus,
+.magi-persona-edit textarea:focus {
+  outline: none;
+  border-color: var(--magi-orange);
+  box-shadow: 0 0 0 1px rgba(255, 140, 46, 0.35);
+}
+
+.magi-form-row {
+  display: flex;
+  gap: 14px;
+}
+
+.magi-form-row label {
+  flex: 1;
+}
+
+.magi-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.magi-examples button {
+  font-size: 0.74rem;
+  padding: 6px 12px;
+  color: var(--magi-text-dim);
+}
+
+/* ---------- buttons ---------- */
+
+.magi-app button {
+  font-family: var(--magi-font-ui);
+  font-size: 0.85rem;
+  padding: 10px 18px;
+  border: 1px solid var(--magi-line);
+  border-radius: 2px;
+  background: var(--magi-panel-alt);
+  color: var(--magi-text-dim);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.magi-app button:hover:not(:disabled) {
+  border-color: var(--magi-orange);
+  color: var(--magi-orange);
+}
+
+.magi-app button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.magi-app button.primary {
+  background: var(--magi-orange);
+  border-color: var(--magi-orange);
+  color: #14100a;
+  font-weight: 700;
+}
+
+.magi-app button.primary:hover:not(:disabled) {
+  color: #14100a;
+  filter: brightness(1.08);
+}
+
+.magi-persona-toggle {
+  width: 100%;
+  text-align: left;
+  font-size: 0.78rem;
+  color: var(--magi-text-faint);
+  margin-bottom: 14px;
+  border-style: dashed;
+}
+
+.magi-persona-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+/* ---------- terminals ---------- */
+
+.magi-terminals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.magi-terminal {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+}
+
+.magi-terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--magi-line);
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+.magi-terminal-names {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.magi-terminal-unit {
+  font-family: var(--magi-font-mono);
+  font-size: 0.65rem;
+  color: var(--magi-text-faint);
+  letter-spacing: 0.14em;
+}
+
+.magi-terminal-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--magi-text);
+}
+
+.magi-terminal-status {
+  font-family: var(--magi-font-mono);
+  font-size: 0.65rem;
+  padding: 4px 10px;
+  border: 1px solid var(--magi-line);
+  border-radius: 2px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  color: var(--magi-orange-soft);
+}
+
+.magi-terminal-status.is-thinking {
+  color: var(--magi-orange);
+  animation: magi-blink 1.6s ease-in-out infinite;
+}
+
+.magi-terminal-status.is-done {
+  color: var(--magi-good);
+  border-color: var(--magi-good);
+}
+
+.magi-terminal-desc {
+  font-size: 0.78rem;
+  color: var(--magi-text-faint);
+  margin: 0 0 12px;
+}
+
+.magi-terminal-body {
+  flex: 1;
+  font-family: var(--magi-font-mono);
+  font-size: 0.85rem;
+  line-height: 1.85;
+  color: var(--magi-text-dim);
+}
+
+.magi-terminal-line {
+  margin: 0 0 6px;
+}
+
+.magi-terminal-line::before {
+  content: '\203A ';
+  color: var(--magi-orange);
+  margin-right: 6px;
+}
+
+.magi-cursor {
+  color: var(--magi-orange);
+  animation: magi-blink 1s step-start infinite;
+}
+
+@keyframes magi-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.magi-terminal-conclusion {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--magi-line);
+}
+
+.magi-choice {
+  font-family: var(--magi-font-ui);
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.magi-choice.is-A {
+  color: var(--magi-good);
+}
+
+.magi-choice.is-B {
+  color: var(--magi-bad);
+}
+
+.magi-vote-button {
+  margin-top: 14px;
+  font-size: 0.75rem;
+  width: 100%;
+}
+
+.magi-vote-button.is-active {
+  background: var(--magi-good);
+  border-color: var(--magi-good);
+  color: #0a1410;
+  font-weight: 700;
+}
+
+/* ---------- verdict ---------- */
+
+.magi-verdict.is-pending {
+  color: var(--magi-text-faint);
+  font-family: var(--magi-font-mono);
+  font-size: 0.82rem;
+}
+
+.magi-verdict h2,
+.magi-history h2 {
+  margin-top: 0;
+  font-size: 0.85rem;
+  color: var(--magi-orange-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-family: var(--magi-font-mono);
+}
+
+.magi-verdict-result {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--magi-orange);
+  margin: 4px 0 10px;
+}
+
+.magi-verdict-summary {
+  font-size: 0.95rem;
+  line-height: 1.75;
+  color: var(--magi-text-dim);
+}
+
+.magi-tradeoffs {
+  padding-left: 22px;
+  margin: 14px 0 0;
+  font-size: 0.85rem;
+  line-height: 1.9;
+  color: var(--magi-text-dim);
+}
+
+.magi-decision {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--magi-line);
+}
+
+.magi-decision-label {
+  font-family: var(--magi-font-mono);
+  font-size: 0.72rem;
+  color: var(--magi-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0 0 12px;
+}
+
+.magi-decision-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.magi-decision-button {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 16px;
+  color: var(--magi-text);
+}
+
+.magi-decision-button.is-A:hover:not(:disabled) {
+  border-color: var(--magi-good);
+  color: var(--magi-good);
+}
+
+.magi-decision-button.is-B:hover:not(:disabled) {
+  border-color: var(--magi-bad);
+  color: var(--magi-bad);
+}
+
+.magi-decision-button.is-selected.is-A {
+  background: var(--magi-good);
+  border-color: var(--magi-good);
+  color: #0a1410;
+}
+
+.magi-decision-button.is-selected.is-B {
+  background: var(--magi-bad);
+  border-color: var(--magi-bad);
+  color: #1a0a08;
+}
+
+.magi-decision-saved {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: var(--magi-good);
+}
+
+/* ---------- display name / history ---------- */
+
+.magi-display-name {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 0.78rem;
+  color: var(--magi-text-dim);
+  margin-bottom: 16px;
+}
+
+.magi-display-name input {
+  font: inherit;
+  font-size: 0.88rem;
+  background: var(--magi-panel-alt);
+  color: var(--magi-text);
+  border: 1px solid var(--magi-line);
+  border-radius: 2px;
+  padding: 9px 12px;
+  max-width: 280px;
+}
+
+.magi-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.magi-history-item {
+  padding: 18px 20px;
+}
+
+.magi-history-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--magi-text);
+}
+
+.magi-history-winner {
+  font-family: var(--magi-font-mono);
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--magi-orange-soft);
+  white-space: nowrap;
+}
+
+.magi-history-decision {
+  font-size: 0.82rem;
+  color: var(--magi-text-dim);
+  margin: 6px 0 0;
+}
+
+.magi-eval {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--magi-line);
+}
+
+.magi-eval-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.magi-eval-button {
+  font-size: 0.78rem;
+  flex: 1;
+}
+
+.magi-eval-button.is-good.is-active {
+  background: var(--magi-good);
+  border-color: var(--magi-good);
+  color: #0a1410;
+  font-weight: 700;
+}
+
+.magi-eval-button.is-bad.is-active {
+  background: var(--magi-bad);
+  border-color: var(--magi-bad);
+  color: #1a0a08;
+  font-weight: 700;
+}
+
+.magi-eval-bar {
+  position: relative;
+  margin-top: 10px;
+  height: 20px;
+  background: var(--magi-bad);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.magi-eval-bar-fill {
+  height: 100%;
+  background: var(--magi-good);
+  transition: width 0.3s ease;
+}
+
+.magi-eval-percent {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--magi-font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #05070a;
+}
+
+.magi-comments {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 0.85rem;
+}
+
+.magi-comments li {
+  display: flex;
+  gap: 10px;
+}
+
+.magi-comment-author {
+  color: var(--magi-orange-soft);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.magi-comment-text {
+  color: var(--magi-text-dim);
+}
+
+.magi-comment-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.magi-comment-form input {
+  flex: 1;
+  font: inherit;
+  font-size: 0.85rem;
+  background: var(--magi-panel-alt);
+  color: var(--magi-text);
+  border: 1px solid var(--magi-line);
+  border-radius: 2px;
+  padding: 8px 12px;
+}
+
+.magi-comment-form button {
+  font-size: 0.78rem;
+}
+
+.magi-back {
+  display: inline-block;
+  color: var(--magi-text-dim);
+  font-size: 0.8rem;
+  text-decoration: none;
+  margin-bottom: 16px;
+}
+
+.magi-back:hover {
+  color: var(--magi-orange);
+}
