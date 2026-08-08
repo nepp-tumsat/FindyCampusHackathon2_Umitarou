@@ -1,0 +1,13 @@
+# このファイルをコピーして .dev.vars を作り、値を埋めてください（.dev.vars はgit管理外）
+# 未設定でもMVP（メンバー参照・AI下書き・掲示板）は問題なく動きます。
+# ストレッチ機能（Googleカレンダー連携・Notion引き継ぎ保存）を使うときだけ必要です。
+
+# Google Cloud ConsoleでOAuthクライアント（ウェブアプリケーション）を作成し、
+# 承認済みのリダイレクトURIに http://localhost:5173/auth/google/callback を追加してください
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# Notionでインテグレーションを作成してトークンを発行し、
+# 引き継ぎページの親ページをそのインテグレーションと共有してください
+NOTION_TOKEN=
+NOTION_PARENT_PAGE_ID=

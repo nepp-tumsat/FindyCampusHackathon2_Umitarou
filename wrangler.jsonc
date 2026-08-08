@@ -4,11 +4,18 @@
   "main": "src/index.tsx",
   "compatibility_date": "2026-06-14",
   "compatibility_flags": ["nodejs_compat"],
+  "ai": {
+    "binding": "AI"
+  },
   "durable_objects": {
     "bindings": [
       {
         "name": "CounterAgent",
         "class_name": "CounterAgent"
+      },
+      {
+        "name": "SakurunAgent",
+        "class_name": "SakurunAgent"
       }
     ]
   },
@@ -16,6 +23,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["CounterAgent"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["SakurunAgent"]
     }
   ]
 }
