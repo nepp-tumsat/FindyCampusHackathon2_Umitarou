@@ -2,16 +2,31 @@ import { useEffect, useState } from 'react'
 import { useAgent } from 'agents/react'
 import type { SakurunAgent } from '../agents/sakurun'
 import type { SakurunState } from '../agents/sakurun'
-import { RECIPIENT_LABELS, SAKURUN_INSTANCE_NAME, type RecipientType } from '../agents/sakurun-types'
+import {
+  CHANNEL_LABELS,
+  RECIPIENT_LABELS,
+  SAKURUN_INSTANCE_NAME,
+  type Channel,
+  type RecipientType
+} from '../agents/sakurun-types'
 import { MEMBERS } from '../data/members'
 
 const RECIPIENT_TYPES = Object.keys(RECIPIENT_LABELS) as RecipientType[]
+const CHANNELS = Object.keys(CHANNEL_LABELS) as Channel[]
 
 const EMPTY_STATE: SakurunState = { drafts: [], boardPosts: [], googleAuth: null, handoverDocs: [] }
+
+type Target = { recipientType: RecipientType; channel: Channel }
+
+function targetKey(t: Target) {
+  return `${t.recipientType}:${t.channel}`
+}
 
 export function SakurunWidget() {
   const [state, setState] = useState<SakurunState>(EMPTY_STATE)
   const [recipientType, setRecipientType] = useState<RecipientType>('member')
+  const [channel, setChannel] = useState<Channel>('line')
+  const [targets, setTargets] = useState<Target[]>([])
   const [situation, setSituation] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleConnected, setGoogleConnected] = useState(false)
@@ -30,12 +45,20 @@ export function SakurunWidget() {
     agent.stub.getGoogleAuthStatus().then((s) => setGoogleConnected(s.connected))
   }, [agent])
 
+  const handleAddTarget = () => {
+    const next: Target = { recipientType, channel }
+    setTargets((prev) => (prev.some((t) => targetKey(t) === targetKey(next)) ? prev : [...prev, next]))
+  }
+
+  const handleRemoveTarget = (key: string) => {
+    setTargets((prev) => prev.filter((t) => targetKey(t) !== key))
+  }
+
   const handleGenerate = async () => {
-    if (!situation.trim()) return
+    if (!situation.trim() || targets.length === 0) return
     setLoading(true)
     try {
-      await agent.stub.draftMessage(recipientType, situation)
-      setSituation('')
+      await Promise.all(targets.map((t) => agent.stub.draftMessage(t.recipientType, t.channel, situation)))
     } finally {
       setLoading(false)
     }
@@ -78,6 +101,10 @@ export function SakurunWidget() {
 
       <section className="card">
         <h2>連絡文の下書きを作る</h2>
+        <p className="section-hint">
+          同じ状況でも、宛先ごとに言い方は変わるはず。宛先を複数追加して、状況を1回書くだけでまとめて下書きできます。
+        </p>
+
         <div className="recipient-tabs">
           {RECIPIENT_TYPES.map((rt) => (
             <button
@@ -90,17 +117,57 @@ export function SakurunWidget() {
             </button>
           ))}
         </div>
-        <div className="field">
+        <div className="channel-toggle">
+          {CHANNELS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`channel-tab${c === channel ? ' active' : ''}`}
+              onClick={() => setChannel(c)}
+            >
+              {CHANNEL_LABELS[c]}
+            </button>
+          ))}
+        </div>
+        <div className="actions-row actions-row-start">
+          <button type="button" className="btn btn-ghost" onClick={handleAddTarget}>
+            + この宛先を追加
+          </button>
+        </div>
+
+        <div className="target-list">
+          {targets.length === 0 && <p className="empty-state">まだ宛先が追加されていません</p>}
+          {targets.map((t) => (
+            <span key={targetKey(t)} className="target-chip">
+              <span className={`badge badge-${t.recipientType}`}>{RECIPIENT_LABELS[t.recipientType]}</span>
+              <span className="badge badge-channel">{CHANNEL_LABELS[t.channel]}</span>
+              <button
+                type="button"
+                className="target-chip-remove"
+                onClick={() => handleRemoveTarget(targetKey(t))}
+                aria-label="削除"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+
+        <div className="field" style={{ marginTop: 12 }}>
           <textarea
             value={situation}
             onChange={(e) => setSituation(e.target.value)}
-            placeholder="状況を入力（例：デザイン担当の子にポスター作成をお願いしたい）"
+            placeholder="状況を入力（例：合同ハッカソンの日程が1週間ずれ込みそう）"
             rows={3}
           />
         </div>
         <div className="actions-row">
-          <button className="btn btn-primary" onClick={handleGenerate} disabled={loading || !situation.trim()}>
-            {loading ? '生成中...' : '下書き生成'}
+          <button
+            className="btn btn-primary"
+            onClick={handleGenerate}
+            disabled={loading || !situation.trim() || targets.length === 0}
+          >
+            {loading ? '生成中...' : `${targets.length}件の宛先にまとめて下書き生成`}
           </button>
         </div>
       </section>
@@ -115,7 +182,10 @@ export function SakurunWidget() {
             .map((d) => (
               <div key={d.id} className="draft-card">
                 <div className="draft-card-header">
-                  <span className={`badge badge-${d.recipientType}`}>{RECIPIENT_LABELS[d.recipientType]}</span>
+                  <span>
+                    <span className={`badge badge-${d.recipientType}`}>{RECIPIENT_LABELS[d.recipientType]}</span>{' '}
+                    <span className="badge badge-channel">{CHANNEL_LABELS[d.channel]}</span>
+                  </span>
                   <span className={`status-badge${d.status === 'confirmed' ? ' confirmed' : ''}`}>
                     {d.status === 'confirmed' ? '確定済み' : '下書き（編集できます）'}
                   </span>
@@ -150,7 +220,7 @@ export function SakurunWidget() {
             .map((p) => (
               <li key={p.id} className="board-item">
                 <span className={`badge badge-${p.recipientType}`}>{RECIPIENT_LABELS[p.recipientType]}</span>{' '}
-                {p.text}
+                <span className="badge badge-channel">{CHANNEL_LABELS[p.channel]}</span> {p.text}
               </li>
             ))}
         </ul>

@@ -1,8 +1,10 @@
 import { Agent, callable } from 'agents'
 import { MEMBERS } from '../data/members'
 import {
+  CHANNEL_LABELS,
   RECIPIENT_LABELS,
   type BoardPost,
+  type Channel,
   type Draft,
   type GoogleTokens,
   type HandoverDoc,
@@ -26,6 +28,11 @@ const RECIPIENT_TONE_GUIDE: Record<RecipientType, string> = {
   company: 'ビジネスメール形式。丁寧語・謙譲語を用いた、社外の企業宛の文書として書く。'
 }
 
+const CHANNEL_STYLE_GUIDE: Record<Channel, string> = {
+  email: '件名を意識した書き出し・宛名・本文・結びの挨拶までを含む、きちんとした構成のメール文面として書く。改行や段落を適切に使う。',
+  line: 'LINEのトークで送るような、短く話しかける文面として書く。宛名や結びの挨拶は省略し、1〜3文程度の簡潔さにする。'
+}
+
 const INTERNAL_RECIPIENTS: RecipientType[] = ['executive', 'member', 'taskAssignee']
 
 const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
@@ -39,7 +46,7 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
   }
 
   @callable()
-  async draftMessage(recipientType: RecipientType, situation: string) {
+  async draftMessage(recipientType: RecipientType, channel: Channel, situation: string) {
     const memberSummary = MEMBERS.map(
       (m) =>
         `- ${m.name}（${m.grade}・${m.role}、参加率${m.participationRate}%、参加不可: ${
@@ -48,9 +55,10 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
     ).join('\n')
 
     const prompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
-以下の状況について、宛先「${RECIPIENT_LABELS[recipientType]}」向けの連絡文を日本語で作成してください。
+以下の状況について、宛先「${RECIPIENT_LABELS[recipientType]}」向け、送信手段「${CHANNEL_LABELS[channel]}」の連絡文を日本語で作成してください。
 
-トーンの指針: ${RECIPIENT_TONE_GUIDE[recipientType]}
+トーン（宛先による丁寧さ）の指針: ${RECIPIENT_TONE_GUIDE[recipientType]}
+フォーマット（送信手段による構成）の指針: ${CHANNEL_STYLE_GUIDE[channel]}
 
 参考情報（メンバーデータ）:
 ${memberSummary}
@@ -68,6 +76,7 @@ ${memberSummary}
     const draft: Draft = {
       id: crypto.randomUUID(),
       recipientType,
+      channel,
       situation,
       generatedText,
       editedText: generatedText,
@@ -100,6 +109,7 @@ ${memberSummary}
           {
             id: crypto.randomUUID(),
             recipientType: target.recipientType,
+            channel: target.channel,
             text: target.editedText,
             createdAt: Date.now()
           }

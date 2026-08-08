@@ -1,5 +1,7 @@
 export type RecipientType = 'executive' | 'member' | 'taskAssignee' | 'partnerOrg' | 'company'
 
+export type Channel = 'email' | 'line'
+
 export type Member = {
   id: string
   name: string
@@ -12,6 +14,7 @@ export type Member = {
 export type Draft = {
   id: string
   recipientType: RecipientType
+  channel: Channel
   situation: string
   generatedText: string
   editedText: string
@@ -22,6 +25,7 @@ export type Draft = {
 export type BoardPost = {
   id: string
   recipientType: RecipientType
+  channel: Channel
   text: string
   createdAt: number
 }
@@ -32,6 +36,11 @@ export const RECIPIENT_LABELS: Record<RecipientType, string> = {
   taskAssignee: 'タスクを依頼する相手',
   partnerOrg: '外部協力団体（他大学の実行委員会など）',
   company: '協賛企業'
+}
+
+export const CHANNEL_LABELS: Record<Channel, string> = {
+  email: 'メール',
+  line: 'LINE'
 }
 
 export const SAKURUN_INSTANCE_NAME = 'default'
