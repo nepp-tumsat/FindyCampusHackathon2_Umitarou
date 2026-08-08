@@ -77,7 +77,7 @@ export function SakurunWidget() {
       </section>
 
       <section className="card">
-        <h2>さくるんに頼む</h2>
+        <h2>連絡文の下書きを作る</h2>
         <div className="recipient-tabs">
           {RECIPIENT_TYPES.map((rt) => (
             <button
