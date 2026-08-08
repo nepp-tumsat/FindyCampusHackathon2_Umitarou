@@ -69,12 +69,7 @@ export function SakurunWidget() {
           </button>
         ))}
       </nav>
-      <p className="visibility-note">
-        掲示板以外は幹部（運営）だけが見る内側のページです
-        <a className="magi-link" href="#magi">
-          ⚙ 幹部専用: MAGI意思決定支援
-        </a>
-      </p>
+      <p className="visibility-note">掲示板以外は幹部（運営）だけが見る内側のページです</p>
 
       {tab === 'consult' && <ConsultTab agent={agent} state={state} goToDrafts={() => setTab('draft')} />}
       {tab === 'draft' && <DraftTab agent={agent} state={state} />}

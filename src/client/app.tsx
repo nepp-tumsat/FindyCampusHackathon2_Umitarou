@@ -19,7 +19,17 @@ function App() {
     document.body.classList.toggle('magi-mode', isMagi)
   }, [isMagi])
 
-  return isMagi ? <MagiApp /> : <SakurunWidget />
+  if (isMagi) return <MagiApp />
+
+  return (
+    <>
+      <SakurunWidget />
+      {/* 隠しモード：右下のフローティングボタンからMAGI（幹部専用）へ */}
+      <a className="magi-fab" href="#magi" title="MAGI意思決定支援（幹部専用）" aria-label="MAGI意思決定支援を開く">
+        ⚙
+      </a>
+    </>
+  )
 }
 
 export default App
