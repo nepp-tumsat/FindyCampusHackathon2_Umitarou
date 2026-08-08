@@ -5,8 +5,18 @@
 - デプロイ先: Cloudflare Workers
 - 状態管理・エージェント: Cloudflare Agents SDK（`agents` / `hono-agents`）、Durable Objects
 - スタイリング: プレーンCSS（`src/style.css`）。新しいライブラリを追加する場合はここに追記してから使う
-- AI: Workers AI binding（`env.AI`）。APIキー取得が不要で無料枠のみで完結するため採用
-- 外部連携（ストレッチ）: Google Calendar API（OAuth、単一アカウント想定）、Notion API（Integration Token）
+- AI: Workers AI binding（`env.AI`）。APIキー取得が不要で無料枠のみで完結するため採用。下書き生成はJSON Schemaによる構造化出力（本文＋5W1H不足リスト）
+- 外部連携: Notion API（Integration Token、プロジェクトの書き出し）、Google Calendar API（OAuth、単一アカウント想定・ストレッチ）
+
+## データモデルの設計方針：決め打ちを避ける
+- 宛先の分類・トーン指針は固定enumやコード埋め込みにせず、**自由記述の`label`と`styleNotes`（書き方メモ）**で表現し、ユーザーが画面上で編集して育てる
+- コードに残る決め打ちは「内部/外部の区分（掲示板反映の判定）」と「メール/LINEの物理フォーマット指針」のみ
+- 文脈（ドメイン知識）は**プロジェクト＋自由記述ノート**として蓄積。スキーマで縛らない。編集・削除可
+- 保存済みの**振り返り（retrospective）は次の下書き生成時に全プロジェクト横断で注入**され、教訓が次のPlanに活きる（PDCA）
+
+### 文脈の注入方式
+データ量が少ない前提で、ノート・振り返りは生成時に**全件プロンプト注入**し、LLMに関連箇所を拾わせる。
+蓄積が増えたら`draftMessage`内の注入部分をVectorize等の検索に差し替える（差し替えポイントはコードコメントに明記済み）。
 
 ## ディレクトリ構成
 ```
@@ -16,28 +26,29 @@ src/
   style.css                - グローバルスタイル
   agents/
     counter.ts            - サンプルDurable Objectエージェント
-    sakurun.ts              - さくるんエージェント本体
+    sakurun.ts              - さくるんエージェント本体（宛先・プロジェクト・ノート・下書き・振り返り）
     sakurun-types.ts         - さくるん関連の型・定数
   integrations/
     google-calendar.ts     - Google Calendar OAuth・イベント作成
-    notion.ts               - Notionページ作成（引き継ぎ文書）
+    notion.ts               - Notionページ作成（汎用。プロジェクト書き出しに使用）
   data/
     members.ts             - メンバーのモックデータ
+    seed.ts                 - 宛先・プロジェクトの初期データ（振り返り済み例を含む）
   client/
     index.tsx              - クライアントエントリーポイント
     app.tsx                 - ルートコンポーネント
     counter.tsx             - サンプルコンポーネント
-    sakurun.tsx              - さくるんの動作確認用UI（簡易モック）
+    sakurun.tsx              - さくるんのUI
 docs/                    - 永続的ドキュメント
 .steering/               - 作業単位のドキュメント
 ```
 実装が進んだら実態に合わせて更新する。
 
-## 環境変数（ストレッチ機能用）
-MVP（メンバー参照・AI下書き・掲示板）は追加設定なしで動く。ストレッチ機能を有効にするときだけ、`.dev.vars`（ローカル）または`wrangler secret put`（本番）で以下を設定する。値は`.dev.vars.example`を参照。
+## 環境変数（外部連携用）
+コア機能（ノート蓄積・AI下書き・振り返り・掲示板）は追加設定なしで動く。外部連携を有効にするときだけ、`.dev.vars`（ローカル）または`wrangler secret put`（本番）で以下を設定する。値は`.dev.vars.example`を参照。
 
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google CalendarのOAuth用
-- `NOTION_TOKEN` / `NOTION_PARENT_PAGE_ID` — Notionへの引き継ぎ文書保存用
+- `NOTION_TOKEN` / `NOTION_PARENT_PAGE_ID` — プロジェクト（ノート＋振り返り）のNotion書き出し用
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — Google CalendarのOAuth用（ストレッチ）
 
 未設定の場合、該当ツールを呼ぶとエラーメッセージを返すだけで、他の機能には影響しない。
 
@@ -51,17 +62,21 @@ MVP（メンバー参照・AI下書き・掲示板）は追加設定なしで動
 ## システム構成図
 ```mermaid
 graph TD
-    User[幹部] -->|自然文で依頼| Sakurun[さくるんエージェント<br/>Durable Object]
-    Sakurun -->|参照| MemberData[メンバーデータ<br/>モック]
-    Sakurun -->|宛先タイプ判定 + 下書き生成| LLM[AI文章生成<br/>TPOトーン切替]
-    LLM -->|下書き| Review[人間による編集・確認<br/>Human-in-the-loop]
-    Review -->|確定（内部宛）| Board[掲示板<br/>Durable Object]
-    Review -.確定後コピーして送信.-> External[外部協力団体・企業宛]
+    User[幹部] -->|状況を1回入力| Sakurun[さくるんエージェント<br/>Durable Object]
+    Notes[プロジェクトのノート<br/>自由記述・編集可] --> Sakurun
+    Retro[過去の振り返り<br/>KPT] --> Sakurun
+    StyleNotes[宛先の書き方メモ<br/>編集可] --> Sakurun
+    MemberData[メンバーデータ<br/>モック] --> Sakurun
+    Sakurun -->|宛先ごとに一括生成| LLM[AI文章生成<br/>構造化出力：本文＋5W1H不足]
+    LLM -->|下書き＋不足情報の警告| Review[人間による編集・確認<br/>Human-in-the-loop]
+    Review -->|確定（内部宛）| Board[掲示板]
+    Review -.確定後コピーして送信.-> External[外部団体・企業宛]
+    Sakurun -->|振り返り生成→編集→保存| Retro
+    Sakurun -->|ノート＋振り返りを書き出し| Notion[Notion API]
     Sakurun -.ストレッチ.-> GCal[Google Calendar API]
-    Sakurun -.ストレッチ.-> Notion[Notion API]
 ```
 
-宛先タイプ（幹部／メンバー／タスク依頼相手／外部協力団体／企業）はLLM呼び出し時のプロンプトに反映し、トーン・フォーマルさを切り替える。下書きは必ずReview（人間の確認・編集）を経てから確定する。
+下書きは必ずReview（人間の確認・編集）を経てから確定する。振り返りも同様にAI生成→人間編集→保存のフロー。
 
 ## 技術的制約
 - Cloudflare Workersの実行環境（`nodejs_compat`フラグ有効）

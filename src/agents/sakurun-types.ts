@@ -1,5 +1,3 @@
-export type RecipientType = 'executive' | 'member' | 'taskAssignee' | 'partnerOrg' | 'company'
-
 export type Channel = 'email' | 'line'
 
 export type Member = {
@@ -11,27 +9,41 @@ export type Member = {
   unavailableDays: string[]
 }
 
+// 宛先。分類は固定enumではなく自由記述のラベルと「書き方メモ」で表現する。
+// トーンの指針はコードに埋め込まず、styleNotesとしてユーザーが編集して育てる。
 export type Contact = {
   id: string
   name: string
-  recipientType: RecipientType
+  label: string
+  internal: boolean
   defaultChannel: Channel
-  notes: string
+  styleNotes: string
 }
 
-export type CircleEvent = {
+// プロジェクト配下に自由記述のノートを蓄積する。スキーマで縛らない。
+export type Note = {
   id: string
-  title: string
-  date: string
-  details: string
+  text: string
   createdAt: number
+  updatedAt: number
+}
+
+export type Project = {
+  id: string
+  name: string
+  notes: Note[]
+  retrospective: string
+  notionUrl?: string
 }
 
 export type Draft = {
   id: string
+  projectId: string | null
+  projectName: string
   contactId: string
   contactName: string
-  recipientType: RecipientType
+  contactLabel: string
+  internal: boolean
   channel: Channel
   situation: string
   generatedText: string
@@ -44,18 +56,10 @@ export type Draft = {
 export type BoardPost = {
   id: string
   contactName: string
-  recipientType: RecipientType
+  contactLabel: string
   channel: Channel
   text: string
   createdAt: number
-}
-
-export const RECIPIENT_LABELS: Record<RecipientType, string> = {
-  executive: '幹部',
-  member: 'メンバー',
-  taskAssignee: 'タスクを依頼する相手',
-  partnerOrg: '外部協力団体（他大学の実行委員会など）',
-  company: '協賛企業'
 }
 
 export const CHANNEL_LABELS: Record<Channel, string> = {
@@ -69,12 +73,4 @@ export type GoogleTokens = {
   accessToken: string
   refreshToken: string
   expiresAt: number
-}
-
-export type HandoverDoc = {
-  id: string
-  title: string
-  content: string
-  notionUrl?: string
-  createdAt: number
 }

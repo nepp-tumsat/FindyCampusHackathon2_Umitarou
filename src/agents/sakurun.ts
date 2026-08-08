@@ -1,44 +1,33 @@
 import { Agent, callable } from 'agents'
 import { MEMBERS } from '../data/members'
-import { SEED_CONTACTS, SEED_EVENTS } from '../data/seed'
+import { SEED_CONTACTS, SEED_PROJECTS } from '../data/seed'
 import {
   CHANNEL_LABELS,
-  RECIPIENT_LABELS,
   type BoardPost,
   type Channel,
-  type CircleEvent,
   type Contact,
   type Draft,
   type GoogleTokens,
-  type HandoverDoc,
-  type RecipientType
+  type Note,
+  type Project
 } from './sakurun-types'
 import { createCalendarEvent, refreshGoogleToken, type CalendarEventInput } from '../integrations/google-calendar'
-import { createNotionHandoverPage } from '../integrations/notion'
+import { createNotionPage } from '../integrations/notion'
 
 export type SakurunState = {
   contacts: Contact[]
-  events: CircleEvent[]
+  projects: Project[]
   drafts: Draft[]
   boardPosts: BoardPost[]
   googleAuth: GoogleTokens | null
-  handoverDocs: HandoverDoc[]
 }
 
-const RECIPIENT_TONE_GUIDE: Record<RecipientType, string> = {
-  executive: '率直かつ簡潔に。意思決定を仰ぐトーンで書く。',
-  member: '分かりやすく前向きに。参加を促すトーンで書く。',
-  taskAssignee: '依頼内容と期限を明確にし、丁寧にお願いするトーンで書く。',
-  partnerOrg: 'フォーマルな敬語を使い、社外の団体宛の調整・依頼文として書く。',
-  company: 'ビジネスメール形式。丁寧語・謙譲語を用いた、社外の企業宛の文書として書く。'
-}
-
+// チャンネルの物理的なフォーマット指針のみコードに残す。
+// 宛先ごとのトーンはContact.styleNotes（ユーザーが編集して育てる）に委ねる。
 const CHANNEL_STYLE_GUIDE: Record<Channel, string> = {
   email: '件名を意識した書き出し・宛名・本文・結びの挨拶までを含む、きちんとした構成のメール文面として書く。改行や段落を適切に使う。',
   line: 'LINEのトークで送るような、短く話しかける文面として書く。宛名や結びの挨拶は省略し、1〜3文程度の簡潔さにする。'
 }
-
-const INTERNAL_RECIPIENTS: RecipientType[] = ['executive', 'member', 'taskAssignee']
 
 const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
 
@@ -61,11 +50,10 @@ type DraftGenerationResult = { body: string; missingInfo: string[] }
 export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
   initialState: SakurunState = {
     contacts: SEED_CONTACTS,
-    events: SEED_EVENTS,
+    projects: SEED_PROJECTS,
     drafts: [],
     boardPosts: [],
-    googleAuth: null,
-    handoverDocs: []
+    googleAuth: null
   }
 
   @callable()
@@ -80,30 +68,68 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
   }
 
   @callable()
-  addContact(name: string, recipientType: RecipientType, defaultChannel: Channel, notes: string) {
-    const contact: Contact = { id: crypto.randomUUID(), name, recipientType, defaultChannel, notes }
+  addContact(name: string, label: string, internal: boolean, defaultChannel: Channel, styleNotes: string) {
+    const contact: Contact = { id: crypto.randomUUID(), name, label, internal, defaultChannel, styleNotes }
     this.setState({ ...this.state, contacts: [...(this.state.contacts ?? []), contact] })
     return contact
   }
 
-  // --- イベント情報の蓄積（ドメイン知識ストア） ---
   @callable()
-  listEvents() {
-    return this.state.events ?? []
+  updateContactStyleNotes(contactId: string, styleNotes: string) {
+    const contacts = (this.state.contacts ?? []).map((c) => (c.id === contactId ? { ...c, styleNotes } : c))
+    this.setState({ ...this.state, contacts })
+    return contacts.find((c) => c.id === contactId)
+  }
+
+  // --- プロジェクトとノート（文脈ストア） ---
+  @callable()
+  listProjects() {
+    return this.state.projects ?? []
   }
 
   @callable()
-  addEvent(title: string, date: string, details: string) {
-    const event: CircleEvent = { id: crypto.randomUUID(), title, date, details, createdAt: Date.now() }
-    this.setState({ ...this.state, events: [...(this.state.events ?? []), event] })
-    return event
+  addProject(name: string) {
+    const project: Project = { id: crypto.randomUUID(), name, notes: [], retrospective: '' }
+    this.setState({ ...this.state, projects: [...(this.state.projects ?? []), project] })
+    return project
+  }
+
+  @callable()
+  addNote(projectId: string, text: string) {
+    const now = Date.now()
+    const note: Note = { id: crypto.randomUUID(), text, createdAt: now, updatedAt: now }
+    const projects = (this.state.projects ?? []).map((p) =>
+      p.id === projectId ? { ...p, notes: [...p.notes, note] } : p
+    )
+    this.setState({ ...this.state, projects })
+    return note
+  }
+
+  @callable()
+  updateNote(projectId: string, noteId: string, text: string) {
+    const projects = (this.state.projects ?? []).map((p) =>
+      p.id === projectId
+        ? { ...p, notes: p.notes.map((n) => (n.id === noteId ? { ...n, text, updatedAt: Date.now() } : n)) }
+        : p
+    )
+    this.setState({ ...this.state, projects })
+  }
+
+  @callable()
+  deleteNote(projectId: string, noteId: string) {
+    const projects = (this.state.projects ?? []).map((p) =>
+      p.id === projectId ? { ...p, notes: p.notes.filter((n) => n.id !== noteId) } : p
+    )
+    this.setState({ ...this.state, projects })
   }
 
   // --- 下書き生成 ---
   @callable()
-  async draftMessage(contactId: string, channel: Channel, situation: string) {
+  async draftMessage(projectId: string | null, contactId: string, channel: Channel, situation: string) {
     const contact = (this.state.contacts ?? []).find((c) => c.id === contactId)
     if (!contact) throw new Error(`contact not found: ${contactId}`)
+
+    const project = projectId ? (this.state.projects ?? []).find((p) => p.id === projectId) : undefined
 
     const memberSummary = MEMBERS.map(
       (m) =>
@@ -112,31 +138,39 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
         }）`
     ).join('\n')
 
-    // データ量が少ない前提でイベント情報は全件注入し、LLMに関連箇所を拾わせる。
+    // データ量が少ない前提でノート・振り返りは全件注入し、LLMに関連箇所を拾わせる。
     // 蓄積が増えたらここをVectorize等の検索に差し替える。
-    const eventSummary = (this.state.events ?? [])
-      .map((e) => `- ${e.title}（${e.date}）: ${e.details}`)
+    const projectContext = project
+      ? `対象プロジェクト「${project.name}」のノート:\n${
+          project.notes.map((n) => `- ${n.text}`).join('\n') || '（まだなし）'
+        }`
+      : '対象プロジェクト: 指定なし（サークル全般の連絡）'
+
+    const pastRetrospectives = (this.state.projects ?? [])
+      .filter((p) => p.retrospective && p.id !== projectId)
+      .map((p) => `- ${p.name}: ${p.retrospective}`)
       .join('\n')
 
     const prompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
 以下の状況について、宛先「${contact.name}」向け、送信手段「${CHANNEL_LABELS[channel]}」の連絡文を日本語で作成してください。
 
 宛先の情報:
-- 分類: ${RECIPIENT_LABELS[contact.recipientType]}
-- 関係性メモ: ${contact.notes || 'なし'}
+- 分類: ${contact.label}
+- 書き方メモ（この宛先へのトーン・言葉遣いの指針。最優先で従うこと）: ${contact.styleNotes || 'なし'}
 
-トーン（宛先による丁寧さ）の指針: ${RECIPIENT_TONE_GUIDE[contact.recipientType]}
 フォーマット（送信手段による構成）の指針: ${CHANNEL_STYLE_GUIDE[channel]}
 
-サークルの蓄積情報（イベント）— 状況に関係するものだけを文脈として使うこと:
-${eventSummary || '（まだ登録なし）'}
+${projectContext}
+
+過去プロジェクトの振り返り（活かせる教訓があれば文面や提案に反映すること）:
+${pastRetrospectives || '（まだなし）'}
 
 参考情報（メンバーデータ）:
 ${memberSummary}
 
 状況: ${situation}
 
-bodyには本文のみ（前置きや説明は不要）を書いてください。蓄積情報に日付や会場などの事実があれば、推測せずそれを使ってください。
+bodyには本文のみ（前置きや説明は不要）を書いてください。ノートに日付や会場などの事実があれば、推測せずそれを使ってください。
 missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/どこで/なぜ/どのように）の観点で見たときに、
 不足・曖昧なため本文中で断定・具体化できなかった点を、日本語の短い箇条書きで列挙してください。
 十分な場合は空配列にしてください。`
@@ -150,9 +184,12 @@ missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/�
 
     const draft: Draft = {
       id: crypto.randomUUID(),
+      projectId: project?.id ?? null,
+      projectName: project?.name ?? '',
       contactId: contact.id,
       contactName: contact.name,
-      recipientType: contact.recipientType,
+      contactLabel: contact.label,
+      internal: contact.internal,
       channel,
       situation,
       generatedText: parsed.body,
@@ -167,7 +204,10 @@ missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/�
   }
 
   private parseDraftResult(result: unknown): DraftGenerationResult {
-    const raw = typeof result === 'object' && result !== null && 'response' in result ? (result as { response: unknown }).response : result
+    const raw =
+      typeof result === 'object' && result !== null && 'response' in result
+        ? (result as { response: unknown }).response
+        : result
 
     const obj = typeof raw === 'string' ? JSON.parse(raw) : raw
 
@@ -193,16 +233,15 @@ missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/�
     const target = this.state.drafts.find((d) => d.id === draftId)
     if (!target) throw new Error(`draft not found: ${draftId}`)
 
-    const isInternal = INTERNAL_RECIPIENTS.includes(target.recipientType)
-    const confirmed: Draft = { ...target, status: 'confirmed', postedToBoard: isInternal }
+    const confirmed: Draft = { ...target, status: 'confirmed', postedToBoard: target.internal }
 
-    const boardPosts: BoardPost[] = isInternal
+    const boardPosts: BoardPost[] = target.internal
       ? [
           ...this.state.boardPosts,
           {
             id: crypto.randomUUID(),
             contactName: target.contactName,
-            recipientType: target.recipientType,
+            contactLabel: target.contactLabel,
             channel: target.channel,
             text: target.editedText,
             createdAt: Date.now()
@@ -213,12 +252,67 @@ missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/�
     const drafts = this.state.drafts.map((d) => (d.id === draftId ? confirmed : d))
 
     this.setState({ ...this.state, drafts, boardPosts })
-    return { draft: confirmed, postedToBoard: isInternal }
+    return { draft: confirmed, postedToBoard: target.internal }
   }
 
   @callable()
   listBoardPosts() {
     return this.state.boardPosts
+  }
+
+  // --- 振り返り（PDCA） ---
+  @callable()
+  async generateRetrospective(projectId: string) {
+    const project = (this.state.projects ?? []).find((p) => p.id === projectId)
+    if (!project) throw new Error(`project not found: ${projectId}`)
+
+    const confirmedDrafts = this.state.drafts
+      .filter((d) => d.projectId === projectId && d.status === 'confirmed')
+      .map((d) => `- ${d.contactName}宛（${CHANNEL_LABELS[d.channel]}）: ${d.editedText}`)
+      .join('\n')
+
+    const prompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
+プロジェクト「${project.name}」の振り返りドラフトをKPT形式（Keep/Problem/Try）で作成してください。
+
+プロジェクトのノート:
+${project.notes.map((n) => `- ${n.text}`).join('\n') || '（なし）'}
+
+このプロジェクトで実際に送った連絡:
+${confirmedDrafts || '（なし）'}
+
+事実に基づいて書き、推測で断定しないでください。情報が足りない観点は「要確認」として挙げてください。
+【Keep】【Problem】【Try】の3見出しで、それぞれ簡潔な箇条書きにしてください。
+これは幹部が編集して確定する下書きです。本文のみを出力してください。`
+
+    const result = await this.env.AI.run(MODEL, {
+      messages: [{ role: 'user', content: prompt }]
+    })
+
+    const text = typeof result === 'string' ? result : (result.response ?? '')
+    return { projectId, text }
+  }
+
+  @callable()
+  saveRetrospective(projectId: string, text: string) {
+    const projects = (this.state.projects ?? []).map((p) => (p.id === projectId ? { ...p, retrospective: text } : p))
+    this.setState({ ...this.state, projects })
+    return projects.find((p) => p.id === projectId)
+  }
+
+  // --- Notion書き出し（プロジェクトの文脈・振り返りを長期保管） ---
+  @callable()
+  async exportProjectToNotion(projectId: string) {
+    const project = (this.state.projects ?? []).find((p) => p.id === projectId)
+    if (!project) throw new Error(`project not found: ${projectId}`)
+
+    const result = await createNotionPage(this.env, `さくるん: ${project.name}`, [
+      { heading: 'ノート', paragraphs: project.notes.length > 0 ? project.notes.map((n) => n.text) : ['（なし）'] },
+      { heading: '振り返り', paragraphs: [project.retrospective || '（未実施）'] }
+    ])
+
+    const projects = (this.state.projects ?? []).map((p) => (p.id === projectId ? { ...p, notionUrl: result.url } : p))
+    this.setState({ ...this.state, projects })
+    return result
   }
 
   // --- Google Calendar連携（ストレッチ） ---
@@ -244,25 +338,5 @@ missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/�
       this.setState({ ...this.state, googleAuth: tokens })
     }
     return createCalendarEvent(tokens.accessToken, input)
-  }
-
-  // --- Notion連携（ストレッチ） ---
-  @callable()
-  async saveHandoverDoc(title: string, content: string) {
-    const result = await createNotionHandoverPage(this.env, title, content)
-    const doc: HandoverDoc = {
-      id: crypto.randomUUID(),
-      title,
-      content,
-      notionUrl: result.url,
-      createdAt: Date.now()
-    }
-    this.setState({ ...this.state, handoverDocs: [...(this.state.handoverDocs ?? []), doc] })
-    return doc
-  }
-
-  @callable()
-  listHandoverDocs() {
-    return this.state.handoverDocs ?? []
   }
 }

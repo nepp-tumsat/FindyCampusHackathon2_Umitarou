@@ -2,41 +2,34 @@ import { useEffect, useState } from 'react'
 import { useAgent } from 'agents/react'
 import type { SakurunAgent } from '../agents/sakurun'
 import type { SakurunState } from '../agents/sakurun'
-import {
-  CHANNEL_LABELS,
-  RECIPIENT_LABELS,
-  SAKURUN_INSTANCE_NAME,
-  type Channel,
-  type Contact
-} from '../agents/sakurun-types'
+import { CHANNEL_LABELS, SAKURUN_INSTANCE_NAME, type Channel, type Contact } from '../agents/sakurun-types'
 import { MEMBERS } from '../data/members'
 
 const CHANNELS = Object.keys(CHANNEL_LABELS) as Channel[]
 
 const EMPTY_STATE: SakurunState = {
   contacts: [],
-  events: [],
+  projects: [],
   drafts: [],
   boardPosts: [],
-  googleAuth: null,
-  handoverDocs: []
+  googleAuth: null
 }
 
 type Selection = { enabled: boolean; channel: Channel }
 
 export function SakurunWidget() {
   const [state, setState] = useState<SakurunState>(EMPTY_STATE)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [selections, setSelections] = useState<Record<string, Selection>>({})
   const [situation, setSituation] = useState('')
   const [loading, setLoading] = useState(false)
-  const [eventTitle, setEventTitle] = useState('')
-  const [eventDate, setEventDate] = useState('')
-  const [eventDetails, setEventDetails] = useState('')
+  const [newProjectName, setNewProjectName] = useState('')
+  const [newNote, setNewNote] = useState('')
+  const [retroDraft, setRetroDraft] = useState<string | null>(null)
+  const [retroLoading, setRetroLoading] = useState(false)
+  const [notionError, setNotionError] = useState<string | null>(null)
+  const [notionExporting, setNotionExporting] = useState(false)
   const [googleConnected, setGoogleConnected] = useState(false)
-  const [handoverTitle, setHandoverTitle] = useState('')
-  const [handoverContent, setHandoverContent] = useState('')
-  const [handoverError, setHandoverError] = useState<string | null>(null)
-  const [savingHandover, setSavingHandover] = useState(false)
 
   const agent = useAgent<SakurunAgent, SakurunState>({
     agent: 'SakurunAgent',
@@ -47,6 +40,9 @@ export function SakurunWidget() {
   useEffect(() => {
     agent.stub.getGoogleAuthStatus().then((s) => setGoogleConnected(s.connected))
   }, [agent])
+
+  const projects = state.projects ?? []
+  const project = projects.find((p) => p.id === selectedProjectId) ?? null
 
   const selectionFor = (c: Contact): Selection => selections[c.id] ?? { enabled: false, channel: c.defaultChannel }
 
@@ -66,32 +62,54 @@ export function SakurunWidget() {
     if (!situation.trim() || targets.length === 0) return
     setLoading(true)
     try {
-      await Promise.all(targets.map((c) => agent.stub.draftMessage(c.id, selectionFor(c).channel, situation)))
+      await Promise.all(
+        targets.map((c) => agent.stub.draftMessage(selectedProjectId, c.id, selectionFor(c).channel, situation))
+      )
     } finally {
       setLoading(false)
     }
   }
 
-  const handleAddEvent = async () => {
-    if (!eventTitle.trim() || !eventDetails.trim()) return
-    await agent.stub.addEvent(eventTitle, eventDate, eventDetails)
-    setEventTitle('')
-    setEventDate('')
-    setEventDetails('')
+  const handleAddProject = async () => {
+    if (!newProjectName.trim()) return
+    const p = await agent.stub.addProject(newProjectName)
+    setNewProjectName('')
+    setSelectedProjectId(p.id)
   }
 
-  const handleSaveHandoverDoc = async () => {
-    if (!handoverTitle.trim() || !handoverContent.trim()) return
-    setSavingHandover(true)
-    setHandoverError(null)
+  const handleAddNote = async () => {
+    if (!project || !newNote.trim()) return
+    await agent.stub.addNote(project.id, newNote)
+    setNewNote('')
+  }
+
+  const handleGenerateRetro = async () => {
+    if (!project) return
+    setRetroLoading(true)
     try {
-      await agent.stub.saveHandoverDoc(handoverTitle, handoverContent)
-      setHandoverTitle('')
-      setHandoverContent('')
-    } catch (e) {
-      setHandoverError(e instanceof Error ? e.message : String(e))
+      const r = await agent.stub.generateRetrospective(project.id)
+      setRetroDraft(r.text)
     } finally {
-      setSavingHandover(false)
+      setRetroLoading(false)
+    }
+  }
+
+  const handleSaveRetro = async () => {
+    if (!project || retroDraft === null) return
+    await agent.stub.saveRetrospective(project.id, retroDraft)
+    setRetroDraft(null)
+  }
+
+  const handleExportNotion = async () => {
+    if (!project) return
+    setNotionExporting(true)
+    setNotionError(null)
+    try {
+      await agent.stub.exportProjectToNotion(project.id)
+    } catch (e) {
+      setNotionError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setNotionExporting(false)
     }
   }
 
@@ -103,64 +121,134 @@ export function SakurunWidget() {
       </header>
 
       <section className="card">
-        <h2>
-          メンバー <span className="muted-suffix">（モックデータ）</span>
-        </h2>
-        <ul className="member-list">
-          {MEMBERS.map((m) => (
-            <li key={m.id} className="member-chip">
-              {m.name} ／ {m.grade}・{m.role} ／ 参加率<span className="rate">{m.participationRate}%</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="card">
-        <h2>イベント情報</h2>
+        <h2>プロジェクト</h2>
         <p className="section-hint">
-          ここに蓄積した情報を、さくるんが文脈として読み取って文面に反映します（日付・会場・協賛などを推測せず事実で書けるようになります）。
+          プロジェクトを選ぶと、そこに蓄積したノートと過去の振り返りを、さくるんが文脈として読み取って文面に反映します。
         </p>
-        <ul className="event-list">
-          {(state.events ?? []).map((e) => (
-            <li key={e.id} className="event-item">
-              <span className="event-title">{e.title}</span>
-              {e.date && <span className="event-date">{e.date}</span>}
-              <p className="event-details">{e.details}</p>
-            </li>
+        <div className="project-tabs">
+          <button
+            type="button"
+            className={`project-tab${selectedProjectId === null ? ' active' : ''}`}
+            onClick={() => {
+              setSelectedProjectId(null)
+              setRetroDraft(null)
+            }}
+          >
+            指定なし（全般）
+          </button>
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`project-tab${selectedProjectId === p.id ? ' active' : ''}`}
+              onClick={() => {
+                setSelectedProjectId(p.id)
+                setRetroDraft(null)
+              }}
+            >
+              {p.name}
+              {p.retrospective && <span className="retro-mark" title="振り返り済み">✓</span>}
+            </button>
           ))}
-        </ul>
-        <div className="event-form">
-          <div className="event-form-row">
+          <div className="project-add">
             <input
               type="text"
-              value={eventTitle}
-              onChange={(e) => setEventTitle(e.target.value)}
-              placeholder="イベント名（例：新歓BBQ）"
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              placeholder="新しいプロジェクト名"
             />
-            <input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
-          </div>
-          <textarea
-            value={eventDetails}
-            onChange={(e) => setEventDetails(e.target.value)}
-            placeholder="詳細（会場、参加者、決定事項、金額など）"
-            rows={2}
-          />
-          <div className="actions-row">
-            <button
-              className="btn btn-ghost"
-              onClick={handleAddEvent}
-              disabled={!eventTitle.trim() || !eventDetails.trim()}
-            >
-              + イベント情報を追加
+            <button type="button" className="btn btn-ghost" onClick={handleAddProject} disabled={!newProjectName.trim()}>
+              追加
             </button>
           </div>
         </div>
+
+        {project && (
+          <>
+            <h3 className="subsection-title">ノート（クリックで編集できます）</h3>
+            <ul className="note-list">
+              {project.notes.length === 0 && <p className="empty-state">まだノートはありません</p>}
+              {project.notes.map((n) => (
+                <li key={n.id} className="note-item">
+                  <textarea
+                    defaultValue={n.text}
+                    rows={2}
+                    onBlur={(e) => {
+                      if (e.target.value !== n.text) agent.stub.updateNote(project.id, n.id, e.target.value)
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="note-delete"
+                    onClick={() => agent.stub.deleteNote(project.id, n.id)}
+                    aria-label="削除"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="note-form">
+              <textarea
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                placeholder="ノートを追加（決定事項、日付、会場、金額、気づき… 自由に）"
+                rows={2}
+              />
+              <div className="actions-row">
+                <button className="btn btn-ghost" onClick={handleAddNote} disabled={!newNote.trim()}>
+                  + ノートを追加
+                </button>
+              </div>
+            </div>
+
+            <h3 className="subsection-title">振り返り（PDCA）</h3>
+            {project.retrospective && retroDraft === null && (
+              <div className="retro-saved">
+                <p className="retro-text">{project.retrospective}</p>
+                <p className="section-hint">保存済み。次のプロジェクトの下書き生成時に、教訓として自動で参照されます。</p>
+              </div>
+            )}
+            {retroDraft === null ? (
+              <div className="actions-row actions-row-start">
+                <button className="btn btn-ghost" onClick={handleGenerateRetro} disabled={retroLoading}>
+                  {retroLoading ? '生成中...' : project.retrospective ? '振り返りを作り直す' : '振り返りを生成'}
+                </button>
+              </div>
+            ) : (
+              <div className="retro-edit">
+                <p className="section-hint">AIが作った下書きです。編集して保存してください。</p>
+                <textarea value={retroDraft} onChange={(e) => setRetroDraft(e.target.value)} rows={6} />
+                <div className="actions-row">
+                  <button className="btn btn-ghost" onClick={() => setRetroDraft(null)}>
+                    破棄
+                  </button>
+                  <button className="btn btn-primary" onClick={handleSaveRetro}>
+                    保存
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="notion-export">
+              <button className="btn btn-ghost" onClick={handleExportNotion} disabled={notionExporting}>
+                {notionExporting ? '書き出し中...' : 'ノートと振り返りをNotionに書き出す'}
+              </button>
+              {project.notionUrl && (
+                <a href={project.notionUrl} target="_blank" rel="noreferrer">
+                  Notionで開く
+                </a>
+              )}
+              {notionError && <p className="error-text">{notionError}</p>}
+            </div>
+          </>
+        )}
       </section>
 
       <section className="card">
         <h2>連絡文の下書きを作る</h2>
         <p className="section-hint">
-          送る相手にチェックを入れ、それぞれメール/LINEを選んでから、状況を1回書くだけでまとめて下書きできます。
+          送る相手にチェックを入れ、それぞれメール/LINEを選んでから、状況を1回書くだけでまとめて下書きできます。相手ごとの「書き方メモ」は▼から編集でき、さくるんはそれに従います。
         </p>
 
         <div className="target-checklist">
@@ -168,25 +256,37 @@ export function SakurunWidget() {
             const sel = selectionFor(c)
             return (
               <div key={c.id} className={`target-row${sel.enabled ? ' enabled' : ''}`}>
-                <label className="target-row-label">
-                  <input type="checkbox" checked={sel.enabled} onChange={() => toggleEnabled(c)} />
-                  <span>
-                    {c.name}
-                    <span className={`badge badge-${c.recipientType}`}>{RECIPIENT_LABELS[c.recipientType]}</span>
-                  </span>
-                </label>
-                <div className="channel-toggle channel-toggle-inline">
-                  {CHANNELS.map((ch) => (
-                    <button
-                      key={ch}
-                      type="button"
-                      className={`channel-tab${sel.channel === ch ? ' active' : ''}`}
-                      onClick={() => setChannelFor(c, ch)}
-                    >
-                      {CHANNEL_LABELS[ch]}
-                    </button>
-                  ))}
+                <div className="target-row-main">
+                  <label className="target-row-label">
+                    <input type="checkbox" checked={sel.enabled} onChange={() => toggleEnabled(c)} />
+                    <span>
+                      {c.name}
+                      <span className={`badge ${c.internal ? 'badge-internal' : 'badge-external'}`}>{c.label}</span>
+                    </span>
+                  </label>
+                  <div className="channel-toggle channel-toggle-inline">
+                    {CHANNELS.map((ch) => (
+                      <button
+                        key={ch}
+                        type="button"
+                        className={`channel-tab${sel.channel === ch ? ' active' : ''}`}
+                        onClick={() => setChannelFor(c, ch)}
+                      >
+                        {CHANNEL_LABELS[ch]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                <details className="style-notes">
+                  <summary>書き方メモ</summary>
+                  <textarea
+                    defaultValue={c.styleNotes}
+                    rows={2}
+                    onBlur={(e) => {
+                      if (e.target.value !== c.styleNotes) agent.stub.updateContactStyleNotes(c.id, e.target.value)
+                    }}
+                  />
+                </details>
               </div>
             )
           })}
@@ -223,8 +323,9 @@ export function SakurunWidget() {
                 <div className="draft-card-header">
                   <span>
                     <strong>{d.contactName}</strong>{' '}
-                    <span className={`badge badge-${d.recipientType}`}>{RECIPIENT_LABELS[d.recipientType]}</span>{' '}
+                    <span className={`badge ${d.internal ? 'badge-internal' : 'badge-external'}`}>{d.contactLabel}</span>{' '}
                     <span className="badge badge-channel">{CHANNEL_LABELS[d.channel]}</span>
+                    {d.projectName && <span className="badge badge-project">{d.projectName}</span>}
                   </span>
                   <span className={`status-badge${d.status === 'confirmed' ? ' confirmed' : ''}`}>
                     {d.status === 'confirmed' ? '確定済み' : '下書き（編集できます）'}
@@ -269,7 +370,7 @@ export function SakurunWidget() {
             .reverse()
             .map((p) => (
               <li key={p.id} className="board-item">
-                <span className={`badge badge-${p.recipientType}`}>{RECIPIENT_LABELS[p.recipientType]}</span>{' '}
+                <span className="badge badge-internal">{p.contactLabel}</span>{' '}
                 <span className="badge badge-channel">{CHANNEL_LABELS[p.channel]}</span> {p.text}
               </li>
             ))}
@@ -278,69 +379,34 @@ export function SakurunWidget() {
 
       <section className="card">
         <h2>
+          メンバー <span className="muted-suffix">（モックデータ）</span>
+        </h2>
+        <ul className="member-list">
+          {MEMBERS.map((m) => (
+            <li key={m.id} className="member-chip">
+              {m.name} ／ {m.grade}・{m.role} ／ 参加率<span className="rate">{m.participationRate}%</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="card">
+        <h2>
           外部連携 <span className="muted-suffix">（ストレッチ）</span>
         </h2>
-        <div className="stretch-grid">
-          <div className="stretch-card">
-            <h3>Googleカレンダー</h3>
-            <div className="connection-status">
-              <span className={`dot${googleConnected ? ' connected' : ''}`} />
-              {googleConnected ? '接続済み' : '未接続'}
-            </div>
-            {!googleConnected && (
-              <div>
-                <a className="btn btn-ghost" href="/auth/google">
-                  連携する
-                </a>
-              </div>
-            )}
+        <div className="stretch-card">
+          <h3>Googleカレンダー</h3>
+          <div className="connection-status">
+            <span className={`dot${googleConnected ? ' connected' : ''}`} />
+            {googleConnected ? '接続済み' : '未接続'}
           </div>
-
-          <div className="stretch-card">
-            <h3>Notion（引き継ぎ文書）</h3>
-            <div className="field">
-              <input
-                type="text"
-                value={handoverTitle}
-                onChange={(e) => setHandoverTitle(e.target.value)}
-                placeholder="タイトル（例：2026年度 引き継ぎ）"
-              />
+          {!googleConnected && (
+            <div>
+              <a className="btn btn-ghost" href="/auth/google">
+                連携する
+              </a>
             </div>
-            <div className="field" style={{ marginTop: 8 }}>
-              <textarea
-                value={handoverContent}
-                onChange={(e) => setHandoverContent(e.target.value)}
-                placeholder="引き継ぎ内容"
-                rows={3}
-              />
-            </div>
-            <div className="actions-row">
-              <button
-                className="btn btn-primary"
-                onClick={handleSaveHandoverDoc}
-                disabled={savingHandover || !handoverTitle.trim() || !handoverContent.trim()}
-              >
-                {savingHandover ? '保存中...' : 'Notionに保存'}
-              </button>
-            </div>
-            {handoverError && <p className="error-text">{handoverError}</p>}
-            <ul className="handover-list">
-              {(state.handoverDocs ?? []).map((d) => (
-                <li key={d.id}>
-                  {d.title}
-                  {d.notionUrl && (
-                    <>
-                      {' '}
-                      —{' '}
-                      <a href={d.notionUrl} target="_blank" rel="noreferrer">
-                        Notionで開く
-                      </a>
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
+          )}
         </div>
       </section>
     </div>
