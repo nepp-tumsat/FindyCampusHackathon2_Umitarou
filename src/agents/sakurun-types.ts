@@ -1,5 +1,8 @@
 export type Channel = 'email' | 'line'
 
+// メンバーも編集して育てる記憶の一部。memoには得意なこと・興味・声かけのコツなどを
+// 自由に書き、さくるんが依頼や声かけで一人ひとりに合った頼み方をするのに使う。
+// 役割をうまく頼れることが、メンバーの当事者意識を育てる起点になる。
 export type Member = {
   id: string
   name: string
@@ -7,6 +10,7 @@ export type Member = {
   role: string
   participationRate: number
   unavailableDays: string[]
+  memo: string
 }
 
 // 宛先。分類は固定enumではなく自由記述のラベルと「書き方メモ」で表現する。
@@ -49,9 +53,13 @@ export type Draft = {
   editedText: string
   missingInfo: string[]
   usedRetroProjects: string[]
-  source: 'manual' | 'routine' | 'auto'
+  source: 'manual' | 'routine' | 'auto' | 'reply'
   routineName?: string
   selectionReason?: string
+  // 返信スレッド：確定後に相手からの返信を貼り付けると、やり取りを文脈に
+  // 返事の下書きが作られる。replyToDraftIdで元の下書きに紐づく
+  replyToDraftId?: string
+  receivedReply?: string
   status: 'draft' | 'confirmed'
   postedToBoard: boolean
 }
@@ -81,6 +89,22 @@ export type BoardPost = {
   contactLabel: string
   channel: Channel
   text: string
+  createdAt: number
+}
+
+// 相談（さくるんとの会話）。返答には「この内容で連絡文を作ろうか？」という
+// 提案が付くことがあり、人間がボタンで承認すると下書き生成に繋がる。
+export type DraftSuggestion = {
+  situation: string
+  projectId: string | null
+  description: string
+}
+
+export type ChatMessage = {
+  id: string
+  role: 'user' | 'sakurun'
+  text: string
+  suggestions: DraftSuggestion[]
   createdAt: number
 }
 

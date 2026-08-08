@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAgent } from 'agents/react'
 import type { SakurunAgent } from '../agents/sakurun'
 import type { SakurunState } from '../agents/sakurun'
@@ -7,29 +7,32 @@ import {
   SAKURUN_INSTANCE_NAME,
   type Channel,
   type Contact,
+  type DraftSuggestion,
   type RoutineSchedule
 } from '../agents/sakurun-types'
-import { MEMBERS } from '../data/members'
 
 const CHANNELS = Object.keys(CHANNEL_LABELS) as Channel[]
 
 const EMPTY_STATE: SakurunState = {
   contacts: [],
   projects: [],
+  members: [],
   drafts: [],
   boardPosts: [],
-  routines: []
+  routines: [],
+  chat: []
 }
 
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
 
 // タブ順はユーザー（幹部）の行動起点で決める：
-// アプリを開くトリガーは「連絡を送らなきゃ」なので先頭は連絡。定例は「毎週同じ連絡を
-// 作ってる」と気づいた時に持ち上げる隣の導線。記憶は連絡作成中に不足に気づいて整備しに
-// 行く設定に近い場所。掲示板（公開）は右端に置き、内と外の境界を位置で表す。
-type Tab = 'draft' | 'routine' | 'memory' | 'board'
+// さくるんの本体は「困りごとの相談窓口」なので相談が先頭＆初期表示。連絡・定例は
+// 相談から繋がる（または直接使う）作る系の導線。記憶は不足に気づいたら整備しに行く
+// 設定に近い場所。掲示板（公開）は右端に置き、内と外の境界を位置で表す。
+type Tab = 'consult' | 'draft' | 'routine' | 'memory' | 'board'
 
 const TAB_LABELS: Record<Tab, string> = {
+  consult: '相談する',
   draft: '連絡をつくる',
   routine: '定例',
   memory: 'サークルの記憶',
@@ -40,7 +43,7 @@ type Selection = { enabled: boolean; channel: Channel }
 
 export function SakurunWidget() {
   const [state, setState] = useState<SakurunState>(EMPTY_STATE)
-  const [tab, setTab] = useState<Tab>('draft')
+  const [tab, setTab] = useState<Tab>('consult')
 
   const agent = useAgent<SakurunAgent, SakurunState>({
     agent: 'SakurunAgent',
@@ -68,6 +71,7 @@ export function SakurunWidget() {
       </nav>
       <p className="visibility-note">掲示板以外は幹部（運営）だけが見る内側のページです</p>
 
+      {tab === 'consult' && <ConsultTab agent={agent} state={state} goToDrafts={() => setTab('draft')} />}
       {tab === 'draft' && <DraftTab agent={agent} state={state} />}
       {tab === 'routine' && <RoutineTab agent={agent} state={state} />}
       {tab === 'memory' && <MemoryTab agent={agent} state={state} />}
@@ -81,6 +85,103 @@ type TabProps = {
   state: SakurunState
 }
 
+function ConsultTab({ agent, state, goToDrafts }: TabProps & { goToDrafts: () => void }) {
+  const [input, setInput] = useState('')
+  const [thinking, setThinking] = useState(false)
+  const [suggestionLoading, setSuggestionLoading] = useState<string | null>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  const chat = state.chat ?? []
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chat.length, thinking])
+
+  const handleSend = async () => {
+    if (!input.trim() || thinking) return
+    const text = input
+    setInput('')
+    setThinking(true)
+    try {
+      await agent.stub.consult(text)
+    } finally {
+      setThinking(false)
+    }
+  }
+
+  const handleSuggestion = async (s: DraftSuggestion) => {
+    setSuggestionLoading(s.description)
+    try {
+      await agent.stub.draftAuto(s.projectId, s.situation)
+      goToDrafts()
+    } finally {
+      setSuggestionLoading(null)
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>さくるんに相談する</h2>
+      <p className="section-hint">
+        困りごとを何でも話しかけてください。さくるんはサークルのこと（活動・メンバー・過去の反省）を覚えているので、それを踏まえて一緒に考えます。連絡が必要なら下書きの提案もします。
+      </p>
+
+      <div className="chat-list">
+        {chat.length === 0 && (
+          <p className="empty-state">
+            例：「高橋くん最近来てないんだよね」「合宿の買い出し、誰に頼めばいいかな」「協賛のお礼っていつ送るべき？」
+          </p>
+        )}
+        {chat.map((m) => (
+          <div key={m.id} className={`chat-row ${m.role}`}>
+            <div className={`chat-bubble ${m.role}`}>
+              <p className="chat-text">{m.text}</p>
+              {m.suggestions.length > 0 && (
+                <div className="chat-suggestions">
+                  {m.suggestions.map((s, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className="btn btn-ghost suggestion-btn"
+                      onClick={() => handleSuggestion(s)}
+                      disabled={suggestionLoading !== null}
+                    >
+                      {suggestionLoading === s.description ? '下書きを作成中...' : `✎ ${s.description}`}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {thinking && (
+          <div className="chat-row sakurun">
+            <div className="chat-bubble sakurun">
+              <p className="chat-text">考え中...</p>
+            </div>
+          </div>
+        )}
+        <div ref={chatEndRef} />
+      </div>
+
+      <div className="chat-input-row">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSend()
+          }}
+          placeholder="困りごとを話しかける（Cmd/Ctrl+Enterで送信）"
+          rows={2}
+        />
+        <button className="btn btn-primary" onClick={handleSend} disabled={thinking || !input.trim()}>
+          送る
+        </button>
+      </div>
+    </section>
+  )
+}
+
 function DraftTab({ agent, state }: TabProps) {
   const [projectId, setProjectId] = useState<string>('p0')
   const [manualMode, setManualMode] = useState(false)
@@ -89,6 +190,9 @@ function DraftTab({ agent, state }: TabProps) {
   const [loading, setLoading] = useState(false)
   const [autoNotice, setAutoNotice] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [replyOpenId, setReplyOpenId] = useState<string | null>(null)
+  const [replyText, setReplyText] = useState('')
+  const [replying, setReplying] = useState(false)
 
   const selectionFor = (c: Contact): Selection => selections[c.id] ?? { enabled: false, channel: c.defaultChannel }
 
@@ -135,6 +239,18 @@ function DraftTab({ agent, state }: TabProps) {
     await navigator.clipboard.writeText(text)
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 1500)
+  }
+
+  const handleReply = async (draftId: string) => {
+    if (!replyText.trim()) return
+    setReplying(true)
+    try {
+      await agent.stub.replyDraft(draftId, replyText)
+      setReplyText('')
+      setReplyOpenId(null)
+    } finally {
+      setReplying(false)
+    }
   }
 
   return (
@@ -227,11 +343,13 @@ function DraftTab({ agent, state }: TabProps) {
                     <span className="badge badge-channel">{CHANNEL_LABELS[d.channel]}</span>
                     {d.projectName && <span className="badge badge-project">{d.projectName}</span>}
                     {d.source === 'routine' && <span className="badge badge-routine">定例: {d.routineName}</span>}
+                    {d.source === 'reply' && <span className="badge badge-routine">返信への返事</span>}
                   </span>
                   <span className={`status-badge${d.status === 'confirmed' ? ' confirmed' : ''}`}>
                     {d.status === 'confirmed' ? '確定済み' : '下書き（編集できます）'}
                   </span>
                 </div>
+                {d.receivedReply && <p className="reply-quote">相手からの返信: {d.receivedReply}</p>}
                 <div className="field">
                   <textarea
                     defaultValue={d.editedText}
@@ -265,7 +383,42 @@ function DraftTab({ agent, state }: TabProps) {
                       確定して送る
                     </button>
                   )}
+                  {d.status === 'confirmed' && replyOpenId !== d.id && (
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setReplyOpenId(d.id)
+                        setReplyText('')
+                      }}
+                    >
+                      返信が来た
+                    </button>
+                  )}
                 </div>
+                {d.status === 'confirmed' && replyOpenId === d.id && (
+                  <div className="reply-form">
+                    <div className="field">
+                      <textarea
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        placeholder="相手からの返信を貼り付けると、やり取りを踏まえた返事の下書きを作ります"
+                        rows={3}
+                      />
+                    </div>
+                    <div className="actions-row">
+                      <button className="btn btn-ghost" onClick={() => setReplyOpenId(null)}>
+                        閉じる
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => handleReply(d.id)}
+                        disabled={replying || !replyText.trim()}
+                      >
+                        {replying ? '生成中...' : '返事の下書きを作る'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
         </div>
@@ -444,15 +597,35 @@ function MemoryTab({ agent, state }: TabProps) {
 
       <section className="card">
         <h2>
-          メンバー <span className="muted-suffix">（サンプルデータ）</span>
+          メンバーの記憶 <span className="muted-suffix">（サンプルデータ）</span>
         </h2>
-        <ul className="member-list">
-          {MEMBERS.map((m) => (
-            <li key={m.id} className="member-chip">
-              {m.name} ／ {m.grade}・{m.role} ／ 参加率<span className="rate">{m.participationRate}%</span>
-            </li>
+        <p className="section-hint">
+          得意なこと・興味・声かけのコツを書いておくと、さくるんが依頼や声かけを「その人に合った頼み方」にします。役割をうまく頼れることが、メンバーの当事者意識を育てます。
+        </p>
+        <div className="contact-list">
+          {(state.members ?? []).map((m) => (
+            <div key={m.id} className="contact-item">
+              <div className="contact-item-header">
+                <strong>{m.name}</strong>
+                <span className="badge badge-internal">
+                  {m.grade}・{m.role}
+                </span>
+                <span className="badge badge-channel">参加率 {m.participationRate}%</span>
+                {m.unavailableDays.length > 0 && (
+                  <span className="badge badge-channel">{m.unavailableDays.join('・')}曜NG</span>
+                )}
+              </div>
+              <textarea
+                defaultValue={m.memo}
+                rows={2}
+                placeholder="得意なこと・興味・声かけのコツなど"
+                onBlur={(e) => {
+                  if (e.target.value !== m.memo) agent.stub.updateMemberMemo(m.id, e.target.value)
+                }}
+              />
+            </div>
           ))}
-        </ul>
+        </div>
       </section>
     </>
   )

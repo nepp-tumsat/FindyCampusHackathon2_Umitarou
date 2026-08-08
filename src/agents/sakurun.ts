@@ -5,8 +5,11 @@ import {
   CHANNEL_LABELS,
   type BoardPost,
   type Channel,
+  type ChatMessage,
   type Contact,
   type Draft,
+  type DraftSuggestion,
+  type Member,
   type Note,
   type Project,
   type Routine,
@@ -16,9 +19,11 @@ import {
 export type SakurunState = {
   contacts: Contact[]
   projects: Project[]
+  members: Member[]
   drafts: Draft[]
   boardPosts: BoardPost[]
   routines: Routine[]
+  chat: ChatMessage[]
 }
 
 // チャンネルの物理的なフォーマット指針のみコードに残す。
@@ -68,18 +73,200 @@ const TARGET_SELECTION_SCHEMA = {
 
 type TargetSelection = { contactId: string; channel: Channel; reason: string }
 
+const CONSULT_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    reply: { type: 'string', description: '相談への返答（日本語。共感し、記憶の事実に基づいて具体的に助言する）' },
+    draftSuggestions: {
+      type: 'array',
+      description:
+        '相談の解決に連絡が有効な場合の提案。不要なら空配列。situationはそのまま下書き生成に使える状況説明文にする。',
+      items: {
+        type: 'object',
+        properties: {
+          situation: { type: 'string', description: '下書き生成に渡す状況説明文' },
+          projectId: { type: 'string', description: '関連するプロジェクトのid。なければ空文字' },
+          description: { type: 'string', description: 'ボタンに表示する短い説明（例：高橋くんへの声かけ文を作る）' }
+        },
+        required: ['situation', 'projectId', 'description']
+      }
+    }
+  },
+  required: ['reply', 'draftSuggestions']
+}
+
 export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
   initialState: SakurunState = {
     contacts: SEED_CONTACTS,
     projects: SEED_PROJECTS,
+    members: MEMBERS,
     drafts: [],
     boardPosts: [],
-    routines: []
+    routines: [],
+    chat: []
+  }
+
+  // --- メンバー（編集して育てる記憶の一部） ---
+  @callable()
+  listMembers() {
+    return this.state.members ?? MEMBERS
   }
 
   @callable()
-  listMembers() {
-    return MEMBERS
+  updateMemberMemo(memberId: string, memo: string) {
+    const members = (this.state.members ?? MEMBERS).map((m) => (m.id === memberId ? { ...m, memo } : m))
+    this.setState({ ...this.state, members })
+    return members.find((m) => m.id === memberId)
+  }
+
+  private memberSummary() {
+    return (this.state.members ?? MEMBERS)
+      .map(
+        (m) =>
+          `- ${m.name}（${m.grade}・${m.role}、参加率${m.participationRate}%、参加不可: ${
+            m.unavailableDays.join('・') || 'なし'
+          }）メモ: ${m.memo || 'なし'}`
+      )
+      .join('\n')
+  }
+
+  // 宛先の解決。宛先マスタに加え、メンバー個人（id: "member:mX"）にも送れるようにする。
+  // メンバー宛の場合は本人のメモを書き方の手がかりとして使う。
+  private resolveRecipient(recipientId: string): {
+    id: string
+    name: string
+    label: string
+    internal: boolean
+    defaultChannel: Channel
+    styleNotes: string
+  } {
+    if (recipientId.startsWith('member:')) {
+      const m = (this.state.members ?? MEMBERS).find((x) => `member:${x.id}` === recipientId)
+      if (!m) throw new Error(`member not found: ${recipientId}`)
+      return {
+        id: recipientId,
+        name: m.name,
+        label: 'メンバー個人',
+        internal: true,
+        defaultChannel: 'line',
+        styleNotes: `${m.grade}・${m.role}。${m.memo}`
+      }
+    }
+    const c = (this.state.contacts ?? []).find((x) => x.id === recipientId)
+    if (!c) throw new Error(`contact not found: ${recipientId}`)
+    return c
+  }
+
+  // 記憶の全体像。相談と下書き生成の両方で使う。
+  // データ量が少ない前提で全件注入し、増えたらVectorize等の検索に差し替える。
+  private memoryContext(projectId: string | null) {
+    const project = projectId ? (this.state.projects ?? []).find((p) => p.id === projectId) : undefined
+
+    const projectContext = project
+      ? `対象プロジェクト「${project.name}」のノート:\n${
+          project.notes.map((n) => `- ${n.text}`).join('\n') || '（まだなし）'
+        }`
+      : ''
+
+    const allProjects = (this.state.projects ?? [])
+      .map((p) => `- id: ${p.id} / ${p.name}: ${p.notes.map((n) => n.text).join(' / ') || '（ノートなし）'}`)
+      .join('\n')
+
+    const retroProjects = (this.state.projects ?? []).filter((p) => p.retrospective && p.id !== projectId)
+    const pastRetrospectives = retroProjects.map((p) => `- ${p.name}: ${p.retrospective}`).join('\n')
+
+    return { project, projectContext, allProjects, retroProjects, pastRetrospectives }
+  }
+
+  // --- 相談（さくるんのコア。困りごとを何でも聞き、必要なら連絡文作成を提案する） ---
+  @callable()
+  listChat() {
+    return this.state.chat ?? []
+  }
+
+  @callable()
+  async consult(text: string) {
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      text,
+      suggestions: [],
+      createdAt: Date.now()
+    }
+    this.setState({ ...this.state, chat: [...(this.state.chat ?? []), userMessage] })
+
+    const { allProjects, pastRetrospectives } = this.memoryContext(null)
+    const contactCatalog = (this.state.contacts ?? [])
+      .map((c) => `- ${c.name}（${c.label}）: ${c.styleNotes}`)
+      .join('\n')
+
+    const history = (this.state.chat ?? [])
+      .slice(-8)
+      .map((m) => `${m.role === 'user' ? '幹部' : 'さくるん'}: ${m.text}`)
+      .join('\n')
+
+    const prompt = `あなたはサークル運営に伴走するAIアシスタント「さくるん」です。
+幹部の困りごとの相談相手として、下のサークルの記憶（事実）に基づいて具体的に答えてください。
+推測で断定せず、記憶にないことは正直に「わからない」と言ってください。
+
+サークルの記憶:
+【プロジェクトとノート】
+${allProjects || '（なし）'}
+
+【過去の振り返り（教訓）】
+${pastRetrospectives || '（なし）'}
+
+【メンバー】
+${this.memberSummary()}
+
+【連絡できる宛先】
+${contactCatalog}
+
+これまでの会話:
+${history}
+
+replyには相談への返答を書いてください。メンバーへの依頼・声かけを助言するときは、そのメンバーのメモ
+（得意・興味・声かけのコツ）を踏まえた頼み方を提案してください。
+連絡を送ることが解決に有効なら、draftSuggestionsに提案を入れてください（勝手に送ることはできません。
+幹部がボタンを押すと下書きが作られます）。`
+
+    const result = await this.env.AI.run(MODEL, {
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_schema', json_schema: CONSULT_RESPONSE_SCHEMA }
+    })
+
+    const raw =
+      typeof result === 'object' && result !== null && 'response' in result
+        ? (result as { response: unknown }).response
+        : result
+    const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as {
+      reply?: string
+      draftSuggestions?: { situation: string; projectId: string; description: string }[]
+    }
+
+    const validProjectIds = new Set((this.state.projects ?? []).map((p) => p.id))
+    const seenDescriptions = new Set<string>()
+    const suggestions: DraftSuggestion[] = (parsed.draftSuggestions ?? [])
+      .filter((s) => {
+        if (seenDescriptions.has(s.description)) return false
+        seenDescriptions.add(s.description)
+        return true
+      })
+      .map((s) => ({
+        situation: s.situation,
+        projectId: validProjectIds.has(s.projectId) ? s.projectId : null,
+        description: s.description
+      }))
+
+    const reply: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'sakurun',
+      text: parsed.reply ?? 'ごめんなさい、うまく答えられませんでした。もう一度聞いてもらえますか？',
+      suggestions,
+      createdAt: Date.now()
+    }
+    this.setState({ ...this.state, chat: [...(this.state.chat ?? []), reply] })
+    return reply
   }
 
   // --- 宛先マスタ ---
@@ -155,16 +342,20 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
   @callable()
   async draftAuto(projectId: string | null, situation: string) {
     const contacts = this.state.contacts ?? []
+    const members = this.state.members ?? MEMBERS
     const project = projectId ? (this.state.projects ?? []).find((p) => p.id === projectId) : undefined
 
-    const contactCatalog = contacts
-      .map(
+    const contactCatalog = [
+      ...contacts.map(
         (c) =>
           `- id: ${c.id} / ${c.name}（${c.label}、${c.internal ? '内部' : '外部'}、既定: ${
             CHANNEL_LABELS[c.defaultChannel]
           }）: ${c.styleNotes}`
+      ),
+      ...members.map(
+        (m) => `- id: member:${m.id} / ${m.name}（メンバー個人、内部、既定: LINE）: ${m.grade}・${m.role}。${m.memo}`
       )
-      .join('\n')
+    ].join('\n')
 
     const selectionPrompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
 以下の状況を、どの宛先に伝えるべきか判定してください。
@@ -177,6 +368,7 @@ ${project ? `関連プロジェクト「${project.name}」のノート:\n${proje
 状況: ${situation}
 
 この状況を伝える必要がある宛先だけをtargetsに含めてください。関係のない宛先を含めてはいけません。
+状況に特定の個人の名前があれば、その人（メンバー個人）を選んでください。
 送信手段は各宛先の既定を基本とし、フォーマルさが必要な内容ならemailを選んでください。`
 
     const result = await this.env.AI.run(MODEL, {
@@ -189,7 +381,7 @@ ${project ? `関連プロジェクト「${project.name}」のノート:\n${proje
         ? (result as { response: unknown }).response
         : result
     const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { targets?: TargetSelection[] }
-    const validIds = new Set(contacts.map((c) => c.id))
+    const validIds = new Set([...contacts.map((c) => c.id), ...members.map((m) => `member:${m.id}`)])
     const targets = (parsed.targets ?? []).filter((t) => validIds.has(t.contactId))
 
     const drafts: Draft[] = []
@@ -214,28 +406,9 @@ ${project ? `関連プロジェクト「${project.name}」のノート:\n${proje
     source: 'manual' | 'routine' | 'auto',
     routineName?: string
   ) {
-    const contact = (this.state.contacts ?? []).find((c) => c.id === contactId)
-    if (!contact) throw new Error(`contact not found: ${contactId}`)
+    const contact = this.resolveRecipient(contactId)
 
-    const project = projectId ? (this.state.projects ?? []).find((p) => p.id === projectId) : undefined
-
-    const memberSummary = MEMBERS.map(
-      (m) =>
-        `- ${m.name}（${m.grade}・${m.role}、参加率${m.participationRate}%、参加不可: ${
-          m.unavailableDays.join('・') || 'なし'
-        }）`
-    ).join('\n')
-
-    // データ量が少ない前提でノート・振り返りは全件注入し、LLMに関連箇所を拾わせる。
-    // 蓄積が増えたらここをVectorize等の検索に差し替える。
-    const projectContext = project
-      ? `対象プロジェクト「${project.name}」のノート:\n${
-          project.notes.map((n) => `- ${n.text}`).join('\n') || '（まだなし）'
-        }`
-      : '対象プロジェクト: 指定なし（サークル全般の連絡）'
-
-    const retroProjects = (this.state.projects ?? []).filter((p) => p.retrospective && p.id !== projectId)
-    const pastRetrospectives = retroProjects.map((p) => `- ${p.name}: ${p.retrospective}`).join('\n')
+    const { project, projectContext, retroProjects, pastRetrospectives } = this.memoryContext(projectId)
 
     const prompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
 以下の状況について、宛先「${contact.name}」向け、送信手段「${CHANNEL_LABELS[channel]}」の連絡文を日本語で作成してください。
@@ -246,13 +419,13 @@ ${project ? `関連プロジェクト「${project.name}」のノート:\n${proje
 
 フォーマット（送信手段による構成）の指針: ${CHANNEL_STYLE_GUIDE[channel]}
 
-${projectContext}
+${projectContext || '対象プロジェクト: 指定なし（サークル全般の連絡）'}
 
 過去プロジェクトの振り返り（活かせる教訓があれば文面や提案に反映すること）:
 ${pastRetrospectives || '（まだなし）'}
 
-参考情報（メンバーデータ）:
-${memberSummary}
+参考情報（メンバー。依頼や声かけの文面では、そのメンバーのメモに合った頼み方をすること）:
+${this.memberSummary()}
 
 状況: ${situation}
 
@@ -284,6 +457,76 @@ missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/�
       usedRetroProjects: retroProjects.map((p) => p.name),
       source,
       routineName,
+      status: 'draft',
+      postedToBoard: false
+    }
+
+    this.setState({ ...this.state, drafts: [...this.state.drafts, draft] })
+    return draft
+  }
+
+  // 確定して送った後、相手からの返信を貼り付けると、やり取りを文脈に返事の下書きを作る
+  @callable()
+  async replyDraft(draftId: string, receivedReply: string) {
+    const original = this.state.drafts.find((d) => d.id === draftId)
+    if (!original) throw new Error(`draft not found: ${draftId}`)
+    const contact = this.resolveRecipient(original.contactId)
+
+    const { projectContext, pastRetrospectives } = this.memoryContext(original.projectId)
+
+    const prompt = `あなたはサークル運営を支援するAIアシスタント「さくるん」です。
+「${contact.name}」とのやり取りの続きとして、返事の文面を日本語で作成してください。
+
+宛先の情報:
+- 分類: ${contact.label}
+- 書き方メモ（この宛先へのトーン・言葉遣いの指針。最優先で従うこと）: ${contact.styleNotes || 'なし'}
+
+フォーマット（送信手段による構成）の指針: ${CHANNEL_STYLE_GUIDE[original.channel]}
+
+${projectContext || ''}
+
+過去プロジェクトの振り返り（活かせる教訓があれば反映すること）:
+${pastRetrospectives || '（まだなし）'}
+
+参考情報（メンバー）:
+${this.memberSummary()}
+
+これまでのやり取り:
+【こちらが送った内容（当初の目的: ${original.situation}）】
+${original.editedText}
+
+【相手からの返信】
+${receivedReply}
+
+bodyには相手の返信を踏まえた返事の本文のみを書いてください。相手の質問には記憶にある事実で答え、
+わからないことは確認して折り返す旨を書いてください。
+missingInfoには、返事を書くうえで不足していて確認が必要な点を日本語の短い箇条書きで列挙してください。
+十分な場合は空配列にしてください。`
+
+    const result = await this.env.AI.run(MODEL, {
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_schema', json_schema: DRAFT_RESPONSE_SCHEMA }
+    })
+
+    const parsed = this.parseDraftResult(result)
+
+    const draft: Draft = {
+      id: crypto.randomUUID(),
+      projectId: original.projectId,
+      projectName: original.projectName,
+      contactId: contact.id,
+      contactName: contact.name,
+      contactLabel: contact.label,
+      internal: contact.internal,
+      channel: original.channel,
+      situation: `${contact.name}からの返信への返事`,
+      generatedText: parsed.body,
+      editedText: parsed.body,
+      missingInfo: parsed.missingInfo,
+      usedRetroProjects: [],
+      source: 'reply',
+      replyToDraftId: original.id,
+      receivedReply,
       status: 'draft',
       postedToBoard: false
     }

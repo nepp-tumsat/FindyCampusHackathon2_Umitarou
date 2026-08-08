@@ -7,7 +7,8 @@ export const MEMBERS: Member[] = [
     grade: '3年',
     role: '部長',
     participationRate: 95,
-    unavailableDays: []
+    unavailableDays: [],
+    memo: '全体を見るのが得意。抱え込みがちなので、仕事は分担するよう声をかける'
   },
   {
     id: 'm2',
@@ -15,7 +16,8 @@ export const MEMBERS: Member[] = [
     grade: '3年',
     role: '会計',
     participationRate: 88,
-    unavailableDays: ['水']
+    unavailableDays: ['水'],
+    memo: '数字に強く事務作業が正確。締切がある仕事だと動きやすいタイプ'
   },
   {
     id: 'm3',
@@ -23,7 +25,8 @@ export const MEMBERS: Member[] = [
     grade: '2年',
     role: 'デザイン担当',
     participationRate: 72,
-    unavailableDays: ['月', '火']
+    unavailableDays: ['月', '火'],
+    memo: 'デザインが得意で、頼られると張り切るタイプ。月火は授業で忙しい'
   },
   {
     id: 'm4',
@@ -31,7 +34,8 @@ export const MEMBERS: Member[] = [
     grade: '2年',
     role: '一般部員',
     participationRate: 45,
-    unavailableDays: ['木', '金']
+    unavailableDays: ['木', '金'],
+    memo: '最近参加率低め。ゲーム開発に興味あり。具体的な役割があると来やすいタイプ'
   },
   {
     id: 'm5',
@@ -39,6 +43,7 @@ export const MEMBERS: Member[] = [
     grade: '1年',
     role: '一般部員',
     participationRate: 60,
-    unavailableDays: ['火']
+    unavailableDays: ['火'],
+    memo: '1年生。イベント企画に興味あり。細かい作業も丁寧にやってくれる'
   }
 ]
