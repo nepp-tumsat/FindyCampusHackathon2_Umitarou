@@ -48,6 +48,10 @@ export type Project = {
 
 export type Draft = {
   id: string
+  // 同時に生成された下書きのまとまり（1回の生成・定例の1回の実行・1つの返信）。
+  // UIはこの単位でアコーディオン表示する
+  batchId: string
+  createdAt: number
   projectId: string | null
   projectName: string
   contactId: string
@@ -90,11 +94,14 @@ export type Routine = {
   lastRunAt: number | null
 }
 
+// 掲示板の投稿。sent=確定した連絡が流れたもの、free=部員の自由な書き込み
 export type BoardPost = {
   id: string
-  contactName: string
-  contactLabel: string
-  channel: Channel
+  kind: 'sent' | 'free'
+  contactName?: string
+  contactLabel?: string
+  channel?: Channel
+  authorName?: string
   text: string
   createdAt: number
 }

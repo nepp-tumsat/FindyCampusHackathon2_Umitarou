@@ -62,11 +62,24 @@ export function SakurunWidget() {
   const [state, setState] = useState<SakurunState>(EMPTY_STATE)
   const [tab, setTab] = useState<Tab>('consult')
 
+  // デモモードは専用の別インスタンスに接続する。リハーサルや過去のデモの実行結果が
+  // 本番データに混ざらず、デモ開始ボタン（?fresh付き遷移）のたびにシード状態へ戻る
   const agent = useAgent<SakurunAgent, SakurunState>({
     agent: 'SakurunAgent',
-    name: SAKURUN_INSTANCE_NAME,
+    name: DEMO ? 'demo' : SAKURUN_INSTANCE_NAME,
     onStateUpdate: (s) => setState(s)
   })
+
+  useEffect(() => {
+    if (!DEMO) return
+    const params = new URLSearchParams(location.search)
+    if (!params.has('fresh')) return
+    agent.stub.resetForDemo().then(() => {
+      params.delete('fresh')
+      history.replaceState(null, '', `${location.pathname}?${params.toString()}${location.hash}`)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="app-shell">
@@ -76,6 +89,15 @@ export function SakurunWidget() {
           アプリ一つでサークルの稼働率アップ！幹部負担を軽減するAIエージェント
           {DEMO && <span className="badge badge-routine">デモモード</span>}
         </p>
+        <button
+          type="button"
+          className="demo-toggle"
+          onClick={() => {
+            location.href = DEMO ? location.pathname : `${location.pathname}?demo&fresh=1`
+          }}
+        >
+          {DEMO ? 'デモを終了' : 'デモモードで開く'}
+        </button>
       </header>
 
       <nav className="tab-nav">
@@ -96,7 +118,7 @@ export function SakurunWidget() {
       {tab === 'routine' && <RoutineTab agent={agent} state={state} />}
       {tab === 'memory' && <MemoryTab agent={agent} state={state} />}
       {tab === 'members' && <MembersTab agent={agent} state={state} />}
-      {tab === 'board' && <BoardTab state={state} />}
+      {tab === 'board' && <BoardTab agent={agent} state={state} />}
     </div>
   )
 }
@@ -143,7 +165,14 @@ function ConsultTab({ agent, state, goToDrafts }: TabProps & { goToDrafts: () =>
 
   return (
     <section className="card">
-      <h2>さくるんに相談する</h2>
+      <div className="consult-header">
+        <h2>さくるんに相談する</h2>
+        {chat.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => agent.stub.clearChat()}>
+            履歴をクリア
+          </button>
+        )}
+      </div>
       <p className="section-hint">
         困りごとを何でも話しかけてください。さくるんはサークルのこと（活動・メンバー・過去の反省）を覚えているので、それを踏まえて一緒に考えます。連絡が必要なら下書きの提案もします。
       </p>
@@ -207,11 +236,46 @@ function ConsultTab({ agent, state, goToDrafts }: TabProps & { goToDrafts: () =>
   )
 }
 
+// 下書きを生成バッチ（1回の生成・定例の1回の実行・1つの返信）単位にまとめる
+type DraftGroup = {
+  key: string
+  title: string
+  time: string
+  drafts: SakurunState['drafts']
+  pending: number
+}
+
+function groupDrafts(drafts: SakurunState['drafts']): DraftGroup[] {
+  const groups: DraftGroup[] = []
+  const index = new Map<string, number>()
+  for (const d of drafts) {
+    const key = d.batchId ?? d.id
+    if (!index.has(key)) {
+      index.set(key, groups.length)
+      const title =
+        d.source === 'routine'
+          ? `定例「${d.routineName}」`
+          : d.source === 'reply'
+            ? `${d.contactName}への返事`
+            : d.situation
+      const time = d.createdAt
+        ? new Date(d.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : ''
+      groups.push({ key, title, time, drafts: [], pending: 0 })
+    }
+    const g = groups[index.get(key)!]
+    g.drafts.push(d)
+    if (d.status === 'draft') g.pending++
+  }
+  return groups.reverse()
+}
+
 function DraftTab({ agent, state }: TabProps) {
   const [projectId, setProjectId] = useState<string>(DEMO ? 'p1' : 'p0')
   const [manualMode, setManualMode] = useState(false)
   const [selections, setSelections] = useState<Record<string, Selection>>({})
   const [situation, setSituation] = useState(DEMO ? DEMO_SITUATION : '')
+  const [openBatches, setOpenBatches] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(false)
   const [autoNotice, setAutoNotice] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -253,7 +317,10 @@ function DraftTab({ agent, state }: TabProps) {
     if (!situation.trim() || targets.length === 0) return
     setLoading(true)
     try {
-      await Promise.all(targets.map((c) => agent.stub.draftMessage(projectId, c.id, selectionFor(c).channel, situation)))
+      const batchId = crypto.randomUUID()
+      await Promise.all(
+        targets.map((c) => agent.stub.draftMessage(projectId, c.id, selectionFor(c).channel, situation, batchId))
+      )
       setSituation('')
     } finally {
       setLoading(false)
@@ -356,10 +423,25 @@ function DraftTab({ agent, state }: TabProps) {
         <h2>下書き一覧</h2>
         {state.drafts.length === 0 && <p className="empty-state">まだ下書きはありません</p>}
         <div className="draft-list">
-          {state.drafts
-            .slice()
-            .reverse()
-            .map((d) => (
+          {groupDrafts(state.drafts).map((g, i) => (
+            <details
+              key={g.key}
+              className="draft-session"
+              open={openBatches[g.key] ?? i === 0}
+              onToggle={(e) => {
+                const o = e.currentTarget.open
+                setOpenBatches((prev) => (prev[g.key] === o ? prev : { ...prev, [g.key]: o }))
+              }}
+            >
+              <summary>
+                <span className="draft-session-title">{g.title}</span>
+                <span className="draft-session-meta">
+                  {g.time && `${g.time} ／ `}
+                  {g.drafts.length}件
+                  {g.pending > 0 && <span className="tab-count">{g.pending}</span>}
+                </span>
+              </summary>
+              {g.drafts.map((d) => (
               <div key={d.id} className="draft-card">
                 <div className="draft-card-header">
                   <span>
@@ -445,7 +527,9 @@ function DraftTab({ agent, state }: TabProps) {
                   </div>
                 )}
               </div>
-            ))}
+              ))}
+            </details>
+          ))}
         </div>
       </section>
     </>
@@ -1036,13 +1120,54 @@ function RoutineTab({ agent, state }: TabProps) {
   )
 }
 
-function BoardTab({ state }: { state: SakurunState }) {
+function BoardTab({ agent, state }: TabProps) {
+  const [authorName, setAuthorName] = useState(() => localStorage.getItem('sakurun-board-name') ?? '')
+  const [text, setText] = useState('')
+  const [posting, setPosting] = useState(false)
+
+  const handlePost = async () => {
+    if (!text.trim()) return
+    setPosting(true)
+    try {
+      await agent.stub.postToBoard(authorName, text)
+      setText('')
+    } finally {
+      setPosting(false)
+    }
+  }
+
   return (
     <section className="card">
       <h2>掲示板</h2>
       <p className="section-hint">
-        部員全員に公開される面はここだけです。内部宛（幹部・メンバー・タスク依頼）の確定した連絡が流れます。下書きや記憶が公開されることはありません。
+        部員全員に公開される面はここだけです。確定した連絡が流れるほか、部員が自由に連絡事項を書き込めます。下書きや記憶が公開されることはありません。
       </p>
+
+      <div className="add-form-row">
+        <input
+          type="text"
+          value={authorName}
+          onChange={(e) => {
+            setAuthorName(e.target.value)
+            localStorage.setItem('sakurun-board-name', e.target.value)
+          }}
+          placeholder="名前（任意）"
+          style={{ maxWidth: 180 }}
+        />
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handlePost()
+          }}
+          placeholder="連絡事項を書き込む（例：土曜の設営、10分遅れます！）"
+        />
+        <button className="btn btn-primary" onClick={handlePost} disabled={posting || !text.trim()}>
+          {posting ? '投稿中...' : '書き込む'}
+        </button>
+      </div>
+
       {state.boardPosts.length === 0 && <p className="empty-state">まだ投稿はありません</p>}
       <ul className="board-list">
         {state.boardPosts
@@ -1050,8 +1175,15 @@ function BoardTab({ state }: { state: SakurunState }) {
           .reverse()
           .map((p) => (
             <li key={p.id} className="board-item">
-              <span className="badge badge-internal">{p.contactLabel}</span>{' '}
-              <span className="badge badge-channel">{CHANNEL_LABELS[p.channel]}</span> {p.text}
+              {p.kind === 'free' ? (
+                <span className="badge badge-channel">{p.authorName}</span>
+              ) : (
+                <>
+                  <span className="badge badge-internal">{p.contactLabel}</span>{' '}
+                  {p.channel && <span className="badge badge-channel">{CHANNEL_LABELS[p.channel]}</span>}
+                </>
+              )}{' '}
+              {p.text}
             </li>
           ))}
       </ul>

@@ -27,7 +27,8 @@ type SakurunSnapshot = {
 }
 
 export function MagiApp() {
-  const agent = useAgent<MagiAgent, MagiState>({ agent: 'MagiAgent', name: 'default' })
+  // デモモードは専用インスタンスに接続（さくるん側のデモ開始時に一緒にリセットされる）
+  const agent = useAgent<MagiAgent, MagiState>({ agent: 'MagiAgent', name: DEMO ? 'demo' : 'default' })
   const [voterId] = useState(getVoterId)
   const [displayName, setDisplayName] = useState(() => localStorage.getItem('magi-display-name') ?? '')
   const [snapshot, setSnapshot] = useState<SakurunSnapshot | null>(null)
@@ -36,7 +37,7 @@ export function MagiApp() {
   const loadSnapshot = async () => {
     setSnapshotLoading(true)
     try {
-      setSnapshot(await agent.stub.getSakurunSnapshot())
+      setSnapshot(await agent.stub.getSakurunSnapshot(DEMO ? 'demo' : undefined))
     } finally {
       setSnapshotLoading(false)
     }

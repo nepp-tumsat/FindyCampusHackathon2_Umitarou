@@ -79,11 +79,18 @@ export class MagiAgent extends Agent<CloudflareBindings, MagiState> {
     this.setState({ ...this.state, personas })
   }
 
+  // デモモード専用インスタンスを初期状態に戻す（さくるん側のresetForDemoから呼ばれる）
+  @callable()
+  resetForDemo() {
+    this.setState({ personas: DEFAULT_PERSONAS, current: null, history: [] })
+  }
+
   // さくるん（SakurunAgent）の記憶をDO間RPCで取得する。
   // 議題の背景情報として画面に表示するために使う（審議ロジック自体は現状モック）。
+  // デモモードではさくるん側もデモインスタンスを参照する
   @callable()
-  async getSakurunSnapshot() {
-    const stub = await getAgentByName(this.env.SakurunAgent, SAKURUN_INSTANCE_NAME)
+  async getSakurunSnapshot(sakurunName?: string) {
+    const stub = await getAgentByName(this.env.SakurunAgent, sakurunName ?? SAKURUN_INSTANCE_NAME)
     const [projects, members] = await Promise.all([stub.listProjects(), stub.listMembers()])
     return {
       projects: projects.map((p) => ({

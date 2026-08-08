@@ -1,4 +1,4 @@
-import { Agent, callable } from 'agents'
+import { Agent, callable, getAgentByName } from 'agents'
 import { MEMBERS, SEED_ATTENDANCE } from '../data/members'
 import { SEED_CONTACTS, SEED_PROJECTS } from '../data/seed'
 import {
@@ -235,6 +235,11 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
   }
 
   @callable()
+  clearChat() {
+    this.setState({ ...this.state, chat: [] })
+  }
+
+  @callable()
   async consult(text: string) {
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -388,8 +393,8 @@ replyには相談への返答を書いてください。メンバーへの依頼
 
   // --- 下書き生成 ---
   @callable()
-  async draftMessage(projectId: string | null, contactId: string, channel: Channel, situation: string) {
-    return this.generateDraft(projectId, contactId, channel, situation, 'manual')
+  async draftMessage(projectId: string | null, contactId: string, channel: Channel, situation: string, batchId?: string) {
+    return this.generateDraft(projectId, contactId, channel, situation, 'manual', undefined, batchId)
   }
 
   // 状況文から宛先をさくるんが判定して一括生成する（デフォルトの入り口）。
@@ -439,9 +444,10 @@ ${project ? `関連プロジェクト「${project.name}」のノート:\n${proje
     const validIds = new Set([...contacts.map((c) => c.id), ...members.map((m) => `member:${m.id}`)])
     const targets = (parsed.targets ?? []).filter((t) => validIds.has(t.contactId))
 
+    const batchId = crypto.randomUUID()
     const drafts: Draft[] = []
     for (const t of targets) {
-      const draft = await this.generateDraft(projectId, t.contactId, t.channel, situation, 'auto')
+      const draft = await this.generateDraft(projectId, t.contactId, t.channel, situation, 'auto', undefined, batchId)
       const withReason = { ...draft, selectionReason: t.reason }
       this.setState({
         ...this.state,
@@ -459,7 +465,8 @@ ${project ? `関連プロジェクト「${project.name}」のノート:\n${proje
     channel: Channel,
     situation: string,
     source: 'manual' | 'routine' | 'auto',
-    routineName?: string
+    routineName?: string,
+    batchId?: string
   ) {
     const contact = this.resolveRecipient(contactId)
 
@@ -498,6 +505,8 @@ missingInfoには、状況説明と蓄積情報を5W1H（誰が/何を/いつ/�
 
     const draft: Draft = {
       id: crypto.randomUUID(),
+      batchId: batchId ?? crypto.randomUUID(),
+      createdAt: Date.now(),
       projectId: project?.id ?? null,
       projectName: project?.name ?? '',
       contactId: contact.id,
@@ -567,6 +576,8 @@ missingInfoには、返事を書くうえで不足していて確認が必要な
 
     const draft: Draft = {
       id: crypto.randomUUID(),
+      batchId: crypto.randomUUID(),
+      createdAt: Date.now(),
       projectId: original.projectId,
       projectName: original.projectName,
       contactId: contact.id,
@@ -654,6 +665,7 @@ missingInfoには、返事を書くうえで不足していて確認が必要な
     const routine = (this.state.routines ?? []).find((r) => r.id === routineId)
     if (!routine) return
 
+    const batchId = crypto.randomUUID()
     for (const contactId of routine.contactIds) {
       try {
         const recipient = this.resolveRecipient(contactId)
@@ -663,7 +675,8 @@ missingInfoには、返事を書くうえで不足していて確認が必要な
           recipient.defaultChannel,
           routine.situation,
           'routine',
-          routine.name
+          routine.name,
+          batchId
         )
       } catch (e) {
         console.error(`routine ${routine.name}: draft generation failed for ${contactId}`, e)
@@ -711,6 +724,7 @@ missingInfoには、返事を書くうえで不足していて確認が必要な
           ...this.state.boardPosts,
           {
             id: crypto.randomUUID(),
+            kind: 'sent',
             contactName: target.contactName,
             contactLabel: target.contactLabel,
             channel: target.channel,
@@ -729,6 +743,46 @@ missingInfoには、返事を書くうえで不足していて確認が必要な
   @callable()
   listBoardPosts() {
     return this.state.boardPosts
+  }
+
+  // 部員の自由な書き込み（掲示板は唯一の公開面）
+  @callable()
+  postToBoard(authorName: string, text: string) {
+    const post: BoardPost = {
+      id: crypto.randomUUID(),
+      kind: 'free',
+      authorName: authorName.trim() || '匿名',
+      text,
+      createdAt: Date.now()
+    }
+    this.setState({ ...this.state, boardPosts: [...this.state.boardPosts, post] })
+    return post
+  }
+
+  // デモモード専用インスタンス（name: "demo"）をシード状態に戻す。
+  // 実演のリハーサル結果が本番デモに残らないよう、デモ開始ボタンから呼ばれる。
+  // MAGIのデモインスタンスもDO間RPCで一緒にリセットする。
+  @callable()
+  async resetForDemo() {
+    for (const r of this.state.routines ?? []) {
+      try {
+        await this.cancelSchedule(r.scheduleId)
+      } catch {
+        // 既に消えたスケジュールは無視
+      }
+    }
+    this.setState({
+      contacts: SEED_CONTACTS,
+      projects: SEED_PROJECTS,
+      members: MEMBERS,
+      attendance: SEED_ATTENDANCE,
+      drafts: [],
+      boardPosts: [],
+      routines: [],
+      chat: []
+    })
+    const magi = await getAgentByName(this.env.MagiAgent, 'demo')
+    await magi.resetForDemo()
   }
 
   // --- 振り返り（PDCA） ---
