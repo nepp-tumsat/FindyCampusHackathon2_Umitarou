@@ -1,21 +1,23 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 
+// サークル運営の意思決定を想定した議題例（デモモードでは先頭が事前入力される）
 const EXAMPLES = [
-  { topic: 'リリース直前での仕様変更', optionA: '受け入れる', optionB: '見送る' },
-  { topic: '次のスプリントで優先すること', optionA: '新機能開発', optionB: 'バグ修正' },
-  { topic: '今日のお昼', optionA: 'ラーメン', optionB: 'カレー' }
+  { topic: '夏合宿の宿はどちらにする？', optionA: '湖畔荘（安いが古い）', optionB: 'レイクビューホテル（高いが綺麗）' },
+  { topic: '合同ハッカソンの懇親会', optionA: '会場でケータリング', optionB: '近くの店に移動' },
+  { topic: '新歓の予算配分', optionA: 'BBQに厚く', optionB: 'ビラ・ポスターに厚く' }
 ]
 
 type Props = {
   onStart: (input: { topic: string; optionA: string; optionB: string }) => void
   busy: boolean
+  demo?: boolean
 }
 
-export function TopicForm({ onStart, busy }: Props) {
-  const [topic, setTopic] = useState('')
-  const [optionA, setOptionA] = useState('')
-  const [optionB, setOptionB] = useState('')
+export function TopicForm({ onStart, busy, demo }: Props) {
+  const [topic, setTopic] = useState(demo ? EXAMPLES[0].topic : '')
+  const [optionA, setOptionA] = useState(demo ? EXAMPLES[0].optionA : '')
+  const [optionB, setOptionB] = useState(demo ? EXAMPLES[0].optionB : '')
 
   const ready = topic.trim() && optionA.trim() && optionB.trim()
 

@@ -1,5 +1,6 @@
-import { Agent, callable } from 'agents'
+import { Agent, callable, getAgentByName } from 'agents'
 import { DEFAULT_PERSONAS } from './magi-types'
+import { SAKURUN_INSTANCE_NAME } from './sakurun-types'
 import type {
   Comment,
   DecisionSession,
@@ -76,6 +77,22 @@ export class MagiAgent extends Agent<CloudflareBindings, MagiState> {
   @callable()
   updatePersonas(personas: Persona[]) {
     this.setState({ ...this.state, personas })
+  }
+
+  // さくるん（SakurunAgent）の記憶をDO間RPCで取得する。
+  // 議題の背景情報として画面に表示するために使う（審議ロジック自体は現状モック）。
+  @callable()
+  async getSakurunSnapshot() {
+    const stub = await getAgentByName(this.env.SakurunAgent, SAKURUN_INSTANCE_NAME)
+    const [projects, members] = await Promise.all([stub.listProjects(), stub.listMembers()])
+    return {
+      projects: projects.map((p) => ({
+        name: p.name,
+        notes: p.notes.map((n) => n.text),
+        retrospective: p.retrospective
+      })),
+      members: members.map((m) => ({ name: m.name, grade: m.grade, role: m.role, memo: m.memo }))
+    }
   }
 
   @callable()

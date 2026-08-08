@@ -1645,3 +1645,49 @@ body.magi-mode {
 .magi-back:hover {
   color: var(--magi-orange);
 }
+
+.magi-context {
+  background: var(--magi-panel);
+  border: 1px solid var(--magi-line);
+  border-left: 3px solid var(--magi-orange-soft);
+  clip-path: polygon(18px 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%, 0 18px);
+  padding: 16px 20px;
+  margin: 18px 0;
+}
+
+.magi-context-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--magi-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  color: var(--magi-text-faint);
+}
+
+.magi-context-body {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.magi-context-block {
+  font-size: 0.78rem;
+  color: var(--magi-text-dim);
+}
+
+.magi-context-block strong {
+  color: var(--magi-orange-soft);
+  font-size: 0.8rem;
+}
+
+.magi-context-block ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+}
+
+.magi-context-block li {
+  margin-bottom: 3px;
+}

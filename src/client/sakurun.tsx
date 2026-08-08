@@ -26,6 +26,21 @@ const EMPTY_STATE: SakurunState = {
 
 const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
 
+// デモモード（URLに ?demo を付けると有効）。
+// 実演中にタイピングせず、ボタン操作だけで一連の流れを見せられるよう各入力を事前入力する。
+const DEMO = typeof location !== 'undefined' && new URLSearchParams(location.search).has('demo')
+
+const DEMO_CONSULT = '高橋くん最近来てないんだよね。どうしたらいいかな'
+const DEMO_SITUATION = '合同ハッカソンの日程が1週間ずれ込みそう'
+const DEMO_RECEIVED_REPLY =
+  'お世話になっております。日程変更の件、承知しました。新しい日程の候補はいつ頃いただけますでしょうか。'
+const DEMO_ROUTINE = {
+  name: '週次活動リマインド',
+  situation: '明日の通常活動のリマインド。出欠の返事を促す'
+}
+const DEMO_NOTE = '懇親会は閉会後に1時間、会場は同じホールで実施と決定。費用は協賛でまかなう。'
+const DEMO_MEMBER = { name: '山田 花', grade: '1年', role: '一般部員', memo: 'イラストが得意。ポスターの装飾を頼みたい' }
+
 // タブ順はユーザー（幹部）の行動起点で決める：
 // さくるんの本体は「困りごとの相談窓口」なので相談が先頭＆初期表示。連絡・定例は
 // 相談から繋がる（または直接使う）作る系の導線。記憶は不足に気づいたら整備しに行く
@@ -57,7 +72,10 @@ export function SakurunWidget() {
     <div className="app-shell">
       <header className="app-header">
         <h1>さくるん</h1>
-        <p className="tagline">アプリ一つでサークルの稼働率アップ！幹部負担を軽減するAIエージェント</p>
+        <p className="tagline">
+          アプリ一つでサークルの稼働率アップ！幹部負担を軽減するAIエージェント
+          {DEMO && <span className="badge badge-routine">デモモード</span>}
+        </p>
       </header>
 
       <nav className="tab-nav">
@@ -89,7 +107,7 @@ type TabProps = {
 }
 
 function ConsultTab({ agent, state, goToDrafts }: TabProps & { goToDrafts: () => void }) {
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(DEMO ? DEMO_CONSULT : '')
   const [thinking, setThinking] = useState(false)
   const [suggestionLoading, setSuggestionLoading] = useState<string | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
@@ -190,10 +208,10 @@ function ConsultTab({ agent, state, goToDrafts }: TabProps & { goToDrafts: () =>
 }
 
 function DraftTab({ agent, state }: TabProps) {
-  const [projectId, setProjectId] = useState<string>('p0')
+  const [projectId, setProjectId] = useState<string>(DEMO ? 'p1' : 'p0')
   const [manualMode, setManualMode] = useState(false)
   const [selections, setSelections] = useState<Record<string, Selection>>({})
-  const [situation, setSituation] = useState('')
+  const [situation, setSituation] = useState(DEMO ? DEMO_SITUATION : '')
   const [loading, setLoading] = useState(false)
   const [autoNotice, setAutoNotice] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -395,7 +413,7 @@ function DraftTab({ agent, state }: TabProps) {
                       className="btn btn-ghost"
                       onClick={() => {
                         setReplyOpenId(d.id)
-                        setReplyText('')
+                        setReplyText(DEMO ? DEMO_RECEIVED_REPLY : '')
                       }}
                     >
                       返信が来た
@@ -436,9 +454,9 @@ function DraftTab({ agent, state }: TabProps) {
 
 function MemoryTab({ agent, state }: TabProps) {
   const projects = state.projects ?? []
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('p0')
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(DEMO ? 'p1' : 'p0')
   const [newProjectName, setNewProjectName] = useState('')
-  const [newNote, setNewNote] = useState('')
+  const [newNote, setNewNote] = useState(DEMO ? DEMO_NOTE : '')
   const [retroDraft, setRetroDraft] = useState<string | null>(null)
   const [retroLoading, setRetroLoading] = useState(false)
 
@@ -663,10 +681,10 @@ function ContactsSection({ agent, state }: TabProps) {
 }
 
 function MembersTab({ agent, state }: TabProps) {
-  const [name, setName] = useState('')
-  const [grade, setGrade] = useState('')
-  const [role, setRole] = useState('')
-  const [memo, setMemo] = useState('')
+  const [name, setName] = useState(DEMO ? DEMO_MEMBER.name : '')
+  const [grade, setGrade] = useState(DEMO ? DEMO_MEMBER.grade : '')
+  const [role, setRole] = useState(DEMO ? DEMO_MEMBER.role : '')
+  const [memo, setMemo] = useState(DEMO ? DEMO_MEMBER.memo : '')
 
   const records = state.attendance ?? []
   const rateOf = (memberId: string) => {
@@ -793,7 +811,7 @@ function MembersTab({ agent, state }: TabProps) {
 function AttendanceSection({ agent, state }: TabProps) {
   const members = state.members ?? []
   const records = state.attendance ?? []
-  const [date, setDate] = useState('')
+  const [date, setDate] = useState(DEMO ? new Date().toISOString().slice(0, 10) : '')
   const [presentIds, setPresentIds] = useState<string[] | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -871,11 +889,11 @@ function AttendanceSection({ agent, state }: TabProps) {
 }
 
 function RoutineTab({ agent, state }: TabProps) {
-  const [name, setName] = useState('')
-  const [situation, setSituation] = useState('')
+  const [name, setName] = useState(DEMO ? DEMO_ROUTINE.name : '')
+  const [situation, setSituation] = useState(DEMO ? DEMO_ROUTINE.situation : '')
   const [projectId, setProjectId] = useState<string>('p0')
-  const [contactIds, setContactIds] = useState<string[]>([])
-  const [scheduleKind, setScheduleKind] = useState<'demoMinutely' | 'daily' | 'weekly'>('weekly')
+  const [contactIds, setContactIds] = useState<string[]>(DEMO ? ['c2'] : [])
+  const [scheduleKind, setScheduleKind] = useState<'demoMinutely' | 'daily' | 'weekly'>(DEMO ? 'demoMinutely' : 'weekly')
   const [dayOfWeek, setDayOfWeek] = useState(5)
   const [time, setTime] = useState('18:00')
   const [saving, setSaving] = useState(false)
@@ -964,7 +982,7 @@ function RoutineTab({ agent, state }: TabProps) {
           ))}
         </div>
 
-        <div className="field-label">プロジェクト（文脈）</div>
+        <div className="field-label">どの活動の連絡？</div>
         <select className="project-select" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
           {(state.projects ?? []).map((p) => (
             <option key={p.id} value={p.id}>
