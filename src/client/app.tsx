@@ -36,6 +36,13 @@ function App() {
 
   return (
     <div className="magi-app">
+      <nav className="app-nav">
+        <a href="/" className="is-active">
+          🤖 MAGI
+        </a>
+        <a href="/restaurants">🍜 飲食店さがし</a>
+      </nav>
+
       <header className="magi-header">
         <h1>MAGI</h1>
         <p>DECISION SUPPORT SYSTEM — 2択の意思決定を3つの視点のAIが検討し、議長AIが多数決で決定する</p>

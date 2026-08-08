@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { agentsMiddleware } from 'hono-agents'
 import { renderToReadableStream } from 'react-dom/server'
 import { Script, Link, ViteClient, ReactRefresh } from 'vite-ssr-components/react'
@@ -9,7 +9,7 @@ const app = new Hono<{ Bindings: CloudflareBindings }>()
 
 app.use('*', agentsMiddleware())
 
-app.get('/', async (c) => {
+const renderShell = async (c: Context<{ Bindings: CloudflareBindings }>) => {
   c.header('Content-Type', 'text/html')
   return c.body(
     await renderToReadableStream(
@@ -26,6 +26,9 @@ app.get('/', async (c) => {
       </html>
     )
   )
-})
+}
+
+app.get('/', renderShell)
+app.get('/restaurants', renderShell)
 
 export default app

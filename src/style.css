@@ -14,6 +14,16 @@
   --magi-font-ui: -apple-system, BlinkMacSystemFont, 'Yu Gothic Medium', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP',
     'Segoe UI', sans-serif;
   --magi-font-mono: 'Cascadia Code', 'SF Mono', Consolas, 'Courier New', monospace;
+
+  --eat-bg: #fff8f1;
+  --eat-panel: #ffffff;
+  --eat-line: #f0ddc9;
+  --eat-accent: #ff7a45;
+  --eat-accent-soft: #ffa76b;
+  --eat-text: #3a2c22;
+  --eat-text-dim: #7a6a5c;
+  --eat-text-faint: #a8998a;
+  --eat-good: #2e9e5b;
 }
 
 * {
@@ -32,6 +42,45 @@ body {
   max-width: 1180px;
   margin: 0 auto;
   padding: 40px 20px 80px;
+}
+
+/* ---------- shared nav (both apps) ---------- */
+
+.app-nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.app-nav a {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--magi-line);
+  color: var(--magi-text-faint);
+}
+
+.magi-app .app-nav a {
+  border-color: var(--magi-line);
+  color: var(--magi-text-faint);
+}
+
+.magi-app .app-nav a.is-active {
+  border-color: var(--magi-orange);
+  color: var(--magi-orange);
+}
+
+.eat-app .app-nav a {
+  border-color: var(--eat-line);
+  color: var(--eat-text-faint);
+}
+
+.eat-app .app-nav a.is-active {
+  border-color: var(--eat-accent);
+  color: var(--eat-accent);
+  background: #fff1e6;
 }
 
 /* ---------- header ---------- */
@@ -591,4 +640,199 @@ button.primary:hover:not(:disabled) {
 
 .magi-comment-form button {
   font-size: 0.78rem;
+}
+
+/* ==================== 飲食店さがしアプリ ==================== */
+
+.eat-app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 20px 80px;
+  background: var(--eat-bg);
+  color: var(--eat-text);
+  min-height: 100vh;
+}
+
+.eat-header h1 {
+  margin: 0;
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--eat-text);
+}
+
+.eat-header p {
+  color: var(--eat-text-dim);
+  font-size: 0.9rem;
+  margin: 10px 0 0;
+}
+
+.eat-main {
+  margin-top: 28px;
+}
+
+.eat-form {
+  background: var(--eat-panel);
+  border: 1px solid var(--eat-line);
+  border-radius: 16px;
+  padding: 22px 24px;
+  box-shadow: 0 10px 28px rgba(120, 80, 40, 0.08);
+}
+
+.eat-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 0.82rem;
+  color: var(--eat-text-dim);
+  margin-bottom: 14px;
+}
+
+.eat-form input {
+  font: inherit;
+  font-size: 0.95rem;
+  background: #fffaf5;
+  color: var(--eat-text);
+  border: 1px solid var(--eat-line);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.eat-form input:focus {
+  outline: none;
+  border-color: var(--eat-accent);
+  box-shadow: 0 0 0 3px rgba(255, 122, 69, 0.15);
+}
+
+.eat-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+
+.eat-examples button {
+  font-family: inherit;
+  font-size: 0.78rem;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--eat-line);
+  background: #fffaf5;
+  color: var(--eat-text-dim);
+  cursor: pointer;
+}
+
+.eat-examples button:hover {
+  border-color: var(--eat-accent);
+  color: var(--eat-accent);
+}
+
+.eat-form button.primary {
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 12px 22px;
+  border-radius: 10px;
+  border: none;
+  background: var(--eat-accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.eat-form button.primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.eat-form button.primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.eat-results {
+  margin-top: 36px;
+}
+
+.eat-results-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--eat-text);
+  margin: 0 0 20px;
+}
+
+.eat-group {
+  margin-bottom: 30px;
+}
+
+.eat-group-label {
+  display: inline-block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--eat-accent-soft);
+  padding: 6px 16px;
+  border-radius: 999px;
+  margin: 0 0 14px;
+}
+
+.eat-group-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.eat-card {
+  background: var(--eat-panel);
+  border: 1px solid var(--eat-line);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 6px 18px rgba(120, 80, 40, 0.06);
+}
+
+.eat-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.eat-card-genre {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--eat-accent);
+  background: #fff1e6;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.eat-card-budget {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--eat-text);
+}
+
+.eat-card-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 4px 0 8px;
+  color: var(--eat-text);
+}
+
+.eat-card-desc {
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--eat-text-dim);
+  margin: 0 0 12px;
+}
+
+.eat-card-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--eat-text-faint);
+  border-top: 1px dashed var(--eat-line);
+  padding-top: 10px;
+}
+
+.eat-card-rating {
+  color: #e0a52e;
+  font-weight: 700;
 }
