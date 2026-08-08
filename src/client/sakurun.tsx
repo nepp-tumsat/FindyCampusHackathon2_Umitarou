@@ -17,6 +17,7 @@ const EMPTY_STATE: SakurunState = {
   contacts: [],
   projects: [],
   members: [],
+  attendance: [],
   drafts: [],
   boardPosts: [],
   routines: [],
@@ -29,13 +30,14 @@ const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土']
 // さくるんの本体は「困りごとの相談窓口」なので相談が先頭＆初期表示。連絡・定例は
 // 相談から繋がる（または直接使う）作る系の導線。記憶は不足に気づいたら整備しに行く
 // 設定に近い場所。掲示板（公開）は右端に置き、内と外の境界を位置で表す。
-type Tab = 'consult' | 'draft' | 'routine' | 'memory' | 'board'
+type Tab = 'consult' | 'draft' | 'routine' | 'memory' | 'members' | 'board'
 
 const TAB_LABELS: Record<Tab, string> = {
   consult: '相談する',
   draft: '連絡をつくる',
   routine: '定例',
   memory: 'サークルの記憶',
+  members: 'メンバー',
   board: '掲示板'
 }
 
@@ -75,6 +77,7 @@ export function SakurunWidget() {
       {tab === 'draft' && <DraftTab agent={agent} state={state} />}
       {tab === 'routine' && <RoutineTab agent={agent} state={state} />}
       {tab === 'memory' && <MemoryTab agent={agent} state={state} />}
+      {tab === 'members' && <MembersTab agent={agent} state={state} />}
       {tab === 'board' && <BoardTab state={state} />}
     </div>
   )
@@ -576,62 +579,294 @@ function MemoryTab({ agent, state }: TabProps) {
         )}
       </section>
 
-      <section className="card">
-        <h2>人の記憶（宛先と書き方メモ）</h2>
-        <p className="section-hint">相手ごとのトーン・言葉遣い・窓口担当などを自由に書いておくと、さくるんはそれに従って書き分けます。</p>
-        <div className="contact-list">
-          {(state.contacts ?? []).map((c) => (
-            <div key={c.id} className="contact-item">
-              <div className="contact-item-header">
-                <strong>{c.name}</strong>
-                <span className={`badge ${c.internal ? 'badge-internal' : 'badge-external'}`}>{c.label}</span>
-                <span className="badge badge-channel">既定: {CHANNEL_LABELS[c.defaultChannel]}</span>
-              </div>
-              <textarea
-                defaultValue={c.styleNotes}
-                rows={2}
-                onBlur={(e) => {
-                  if (e.target.value !== c.styleNotes) agent.stub.updateContactStyleNotes(c.id, e.target.value)
-                }}
-              />
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>
-          メンバーの記憶 <span className="muted-suffix">（サンプルデータ）</span>
-        </h2>
-        <p className="section-hint">
-          得意なこと・興味・声かけのコツを書いておくと、さくるんが依頼や声かけを「その人に合った頼み方」にします。役割をうまく頼れることが、メンバーの当事者意識を育てます。
-        </p>
-        <div className="contact-list">
-          {(state.members ?? []).map((m) => (
-            <div key={m.id} className="contact-item">
-              <div className="contact-item-header">
-                <strong>{m.name}</strong>
-                <span className="badge badge-internal">
-                  {m.grade}・{m.role}
-                </span>
-                <span className="badge badge-channel">参加率 {m.participationRate}%</span>
-                {m.unavailableDays.length > 0 && (
-                  <span className="badge badge-channel">{m.unavailableDays.join('・')}曜NG</span>
-                )}
-              </div>
-              <textarea
-                defaultValue={m.memo}
-                rows={2}
-                placeholder="得意なこと・興味・声かけのコツなど"
-                onBlur={(e) => {
-                  if (e.target.value !== m.memo) agent.stub.updateMemberMemo(m.id, e.target.value)
-                }}
-              />
-            </div>
-          ))}
-        </div>
-      </section>
+      <ContactsSection agent={agent} state={state} />
     </>
+  )
+}
+
+function ContactsSection({ agent, state }: TabProps) {
+  const [name, setName] = useState('')
+  const [label, setLabel] = useState('')
+  const [internal, setInternal] = useState(true)
+  const [channel, setChannel] = useState<Channel>('line')
+  const [notes, setNotes] = useState('')
+
+  const handleAdd = async () => {
+    if (!name.trim()) return
+    await agent.stub.addContact(name, label.trim() || 'その他', internal, channel, notes)
+    setName('')
+    setLabel('')
+    setNotes('')
+  }
+
+  return (
+    <section className="card">
+      <h2>人の記憶（宛先と書き方メモ）</h2>
+      <p className="section-hint">相手ごとのトーン・言葉遣い・窓口担当などを自由に書いておくと、さくるんはそれに従って書き分けます。</p>
+      <div className="contact-list">
+        {(state.contacts ?? []).map((c) => (
+          <div key={c.id} className="contact-item">
+            <div className="contact-item-header">
+              <strong>{c.name}</strong>
+              <span className={`badge ${c.internal ? 'badge-internal' : 'badge-external'}`}>{c.label}</span>
+              <span className="badge badge-channel">既定: {CHANNEL_LABELS[c.defaultChannel]}</span>
+              <button
+                type="button"
+                className="note-delete item-delete"
+                onClick={() => agent.stub.deleteContact(c.id)}
+                aria-label="削除"
+              >
+                ×
+              </button>
+            </div>
+            <textarea
+              defaultValue={c.styleNotes}
+              rows={2}
+              onBlur={(e) => {
+                if (e.target.value !== c.styleNotes) agent.stub.updateContactStyleNotes(c.id, e.target.value)
+              }}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="add-form">
+        <div className="add-form-row">
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="宛先の名前（例：OB会）" />
+          <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="分類（例：OB）" />
+          <select value={internal ? 'internal' : 'external'} onChange={(e) => setInternal(e.target.value === 'internal')}>
+            <option value="internal">内部（確定で掲示板へ）</option>
+            <option value="external">外部（コピーして送信）</option>
+          </select>
+          <select value={channel} onChange={(e) => setChannel(e.target.value as Channel)}>
+            {CHANNELS.map((ch) => (
+              <option key={ch} value={ch}>
+                既定: {CHANNEL_LABELS[ch]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="書き方メモ（トーン・言葉遣い・窓口担当など）"
+          rows={2}
+        />
+        <div className="actions-row">
+          <button className="btn btn-ghost" onClick={handleAdd} disabled={!name.trim()}>
+            + 宛先を追加
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function MembersTab({ agent, state }: TabProps) {
+  const [name, setName] = useState('')
+  const [grade, setGrade] = useState('')
+  const [role, setRole] = useState('')
+  const [memo, setMemo] = useState('')
+
+  const records = state.attendance ?? []
+  const rateOf = (memberId: string) => {
+    if (records.length === 0) return null
+    const attended = records.filter((r) => r.presentMemberIds.includes(memberId)).length
+    return { percent: Math.round((attended / records.length) * 100), attended, total: records.length }
+  }
+
+  const handleAdd = async () => {
+    if (!name.trim()) return
+    await agent.stub.addMember(name, grade.trim() || '学年不明', role.trim() || '一般部員', memo)
+    setName('')
+    setGrade('')
+    setRole('')
+    setMemo('')
+  }
+
+  const toggleDay = (memberId: string, days: string[], day: string) => {
+    const next = days.includes(day) ? days.filter((d) => d !== day) : [...days, day]
+    agent.stub.updateMember(memberId, { unavailableDays: next })
+  }
+
+  return (
+    <>
+    <section className="card">
+      <h2>メンバー一覧</h2>
+      <p className="section-hint">
+        メンバーの情報はさくるんの記憶になります。得意なこと・興味・声かけのコツを書いておくと、依頼や声かけが「その人に合った頼み方」になります。参加率は下の出欠記録から自動計算されます。
+      </p>
+
+      <div className="contact-list">
+        {(state.members ?? []).map((m) => {
+          const rate = rateOf(m.id)
+          return (
+          <div key={m.id} className="contact-item member-row">
+            <div className="member-edit-row">
+              <input
+                type="text"
+                className="member-name"
+                defaultValue={m.name}
+                onBlur={(e) => {
+                  if (e.target.value !== m.name && e.target.value.trim()) agent.stub.updateMember(m.id, { name: e.target.value })
+                }}
+              />
+              <input
+                type="text"
+                className="member-grade"
+                defaultValue={m.grade}
+                onBlur={(e) => {
+                  if (e.target.value !== m.grade) agent.stub.updateMember(m.id, { grade: e.target.value })
+                }}
+              />
+              <input
+                type="text"
+                className="member-role"
+                defaultValue={m.role}
+                onBlur={(e) => {
+                  if (e.target.value !== m.role) agent.stub.updateMember(m.id, { role: e.target.value })
+                }}
+              />
+              <span className="badge badge-channel">
+                {rate === null ? '参加率 未記録' : `参加率 ${rate.percent}%（${rate.total}回中${rate.attended}回）`}
+              </span>
+              <button
+                type="button"
+                className="note-delete item-delete"
+                onClick={() => agent.stub.deleteMember(m.id)}
+                aria-label="削除"
+              >
+                ×
+              </button>
+            </div>
+            <div className="member-days">
+              <span className="member-days-label">参加できない曜日:</span>
+              {DAY_LABELS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`day-chip${m.unavailableDays.includes(d) ? ' selected' : ''}`}
+                  onClick={() => toggleDay(m.id, m.unavailableDays, d)}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+            <textarea
+              defaultValue={m.memo}
+              rows={2}
+              placeholder="得意なこと・興味・声かけのコツなど"
+              onBlur={(e) => {
+                if (e.target.value !== m.memo) agent.stub.updateMemberMemo(m.id, e.target.value)
+              }}
+            />
+          </div>
+          )
+        })}
+      </div>
+
+      <div className="add-form">
+        <div className="add-form-row">
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="名前（例：山田 花）" />
+          <input type="text" value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="学年（例：1年）" />
+          <input type="text" value={role} onChange={(e) => setRole(e.target.value)} placeholder="役職（例：一般部員）" />
+        </div>
+        <textarea
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+          placeholder="メモ（得意なこと・興味・声かけのコツなど）"
+          rows={2}
+        />
+        <div className="actions-row">
+          <button className="btn btn-ghost" onClick={handleAdd} disabled={!name.trim()}>
+            + メンバーを追加
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <AttendanceSection agent={agent} state={state} />
+    </>
+  )
+}
+
+function AttendanceSection({ agent, state }: TabProps) {
+  const members = state.members ?? []
+  const records = state.attendance ?? []
+  const [date, setDate] = useState('')
+  const [presentIds, setPresentIds] = useState<string[] | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  // 初期状態は全員出席にしておき、欠席者のチェックを外す運用にする
+  const present = presentIds ?? members.map((m) => m.id)
+
+  const togglePresent = (id: string) => {
+    setPresentIds(present.includes(id) ? present.filter((p) => p !== id) : [...present, id])
+  }
+
+  const handleSave = async () => {
+    if (!date) return
+    setSaving(true)
+    try {
+      await agent.stub.recordAttendance(date, present)
+      setDate('')
+      setPresentIds(null)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const memberName = (id: string) => members.find((m) => m.id === id)?.name ?? '（退部済み）'
+
+  return (
+    <section className="card">
+      <h2>出欠を記録する</h2>
+      <p className="section-hint">
+        活動日ごとに出席した人へチェックを入れて保存すると、参加率が自動で更新されます。
+      </p>
+
+      <div className="add-form-row">
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </div>
+      <div className="routine-contacts" style={{ marginBottom: 10 }}>
+        {members.map((m) => (
+          <label key={m.id} className={`routine-contact-chip${present.includes(m.id) ? ' selected' : ''}`}>
+            <input type="checkbox" checked={present.includes(m.id)} onChange={() => togglePresent(m.id)} />
+            {m.name}
+          </label>
+        ))}
+      </div>
+      <div className="actions-row actions-row-start">
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving || !date}>
+          {saving ? '保存中...' : 'この内容で記録する'}
+        </button>
+      </div>
+
+      <h3 className="subsection-title">記録済み（{records.length}回）</h3>
+      <ul className="routine-list">
+        {records
+          .slice()
+          .reverse()
+          .map((r) => (
+            <li key={r.id} className="routine-item">
+              <div>
+                <strong>{r.date}</strong>
+                <p className="routine-meta">
+                  出席 {r.presentMemberIds.length}名: {r.presentMemberIds.map(memberName).join('、')}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="note-delete"
+                onClick={() => agent.stub.deleteAttendance(r.id)}
+                aria-label="削除"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+      </ul>
+    </section>
   )
 }
 
@@ -644,6 +879,13 @@ function RoutineTab({ agent, state }: TabProps) {
   const [dayOfWeek, setDayOfWeek] = useState(5)
   const [time, setTime] = useState('18:00')
   const [saving, setSaving] = useState(false)
+
+  // 宛先マスタ＋メンバー個人の両方を定例の宛先に選べる
+  const recipients = [
+    ...(state.contacts ?? []).map((c) => ({ id: c.id, name: c.name, channel: c.defaultChannel })),
+    ...(state.members ?? []).map((m) => ({ id: `member:${m.id}`, name: m.name, channel: 'line' as Channel }))
+  ]
+  const recipientName = (id: string) => recipients.find((r) => r.id === id)?.name ?? '?'
 
   const toggleContact = (id: string) => {
     setContactIds((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]))
@@ -712,12 +954,12 @@ function RoutineTab({ agent, state }: TabProps) {
           {scheduleKind !== 'demoMinutely' && <input type="time" value={time} onChange={(e) => setTime(e.target.value)} />}
         </div>
 
-        <div className="field-label">宛先</div>
+        <div className="field-label">宛先（宛先マスタとメンバー個人から選べます）</div>
         <div className="routine-contacts">
-          {(state.contacts ?? []).map((c) => (
-            <label key={c.id} className={`routine-contact-chip${contactIds.includes(c.id) ? ' selected' : ''}`}>
-              <input type="checkbox" checked={contactIds.includes(c.id)} onChange={() => toggleContact(c.id)} />
-              {c.name}（{CHANNEL_LABELS[c.defaultChannel]}）
+          {recipients.map((r) => (
+            <label key={r.id} className={`routine-contact-chip${contactIds.includes(r.id) ? ' selected' : ''}`}>
+              <input type="checkbox" checked={contactIds.includes(r.id)} onChange={() => toggleContact(r.id)} />
+              {r.name}（{CHANNEL_LABELS[r.channel]}）
             </label>
           ))}
         </div>
@@ -761,7 +1003,7 @@ function RoutineTab({ agent, state }: TabProps) {
               <div>
                 <strong>{r.name}</strong> <span className="badge badge-routine">{r.scheduleLabel}</span>
                 <p className="routine-meta">
-                  宛先: {r.contactIds.map((id) => (state.contacts ?? []).find((c) => c.id === id)?.name ?? '?').join('、')}
+                  宛先: {r.contactIds.map(recipientName).join('、')}
                   {r.lastRunAt ? ` ／ 最終実行: ${new Date(r.lastRunAt).toLocaleString('ja-JP')}` : ' ／ まだ実行されていません'}
                 </p>
               </div>

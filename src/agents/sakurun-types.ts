@@ -8,9 +8,16 @@ export type Member = {
   name: string
   grade: string
   role: string
-  participationRate: number
   unavailableDays: string[]
   memo: string
+}
+
+// 活動ごとの出欠記録。参加率は手入力ではなく、この記録から自動計算する
+export type AttendanceRecord = {
+  id: string
+  date: string
+  presentMemberIds: string[]
+  createdAt: number
 }
 
 // 宛先。分類は固定enumではなく自由記述のラベルと「書き方メモ」で表現する。

@@ -1,8 +1,9 @@
 import { Agent, callable } from 'agents'
-import { MEMBERS } from '../data/members'
+import { MEMBERS, SEED_ATTENDANCE } from '../data/members'
 import { SEED_CONTACTS, SEED_PROJECTS } from '../data/seed'
 import {
   CHANNEL_LABELS,
+  type AttendanceRecord,
   type BoardPost,
   type Channel,
   type ChatMessage,
@@ -20,6 +21,7 @@ export type SakurunState = {
   contacts: Contact[]
   projects: Project[]
   members: Member[]
+  attendance: AttendanceRecord[]
   drafts: Draft[]
   boardPosts: BoardPost[]
   routines: Routine[]
@@ -100,6 +102,7 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
     contacts: SEED_CONTACTS,
     projects: SEED_PROJECTS,
     members: MEMBERS,
+    attendance: SEED_ATTENDANCE,
     drafts: [],
     boardPosts: [],
     routines: [],
@@ -119,14 +122,61 @@ export class SakurunAgent extends Agent<CloudflareBindings, SakurunState> {
     return members.find((m) => m.id === memberId)
   }
 
+  @callable()
+  updateMember(memberId: string, patch: Partial<Pick<Member, 'name' | 'grade' | 'role' | 'unavailableDays' | 'memo'>>) {
+    const members = (this.state.members ?? MEMBERS).map((m) => (m.id === memberId ? { ...m, ...patch } : m))
+    this.setState({ ...this.state, members })
+    return members.find((m) => m.id === memberId)
+  }
+
+  @callable()
+  addMember(name: string, grade: string, role: string, memo: string) {
+    const member: Member = {
+      id: crypto.randomUUID(),
+      name,
+      grade,
+      role,
+      unavailableDays: [],
+      memo
+    }
+    this.setState({ ...this.state, members: [...(this.state.members ?? MEMBERS), member] })
+    return member
+  }
+
+  @callable()
+  deleteMember(memberId: string) {
+    this.setState({ ...this.state, members: (this.state.members ?? MEMBERS).filter((m) => m.id !== memberId) })
+  }
+
+  // --- 出欠記録（参加率は手入力ではなくここから自動計算する） ---
+  @callable()
+  recordAttendance(date: string, presentMemberIds: string[]) {
+    const record: AttendanceRecord = { id: crypto.randomUUID(), date, presentMemberIds, createdAt: Date.now() }
+    this.setState({ ...this.state, attendance: [...(this.state.attendance ?? []), record] })
+    return record
+  }
+
+  @callable()
+  deleteAttendance(recordId: string) {
+    this.setState({ ...this.state, attendance: (this.state.attendance ?? []).filter((r) => r.id !== recordId) })
+  }
+
+  // 参加率（%）。記録が1件もなければnull
+  private participationRate(memberId: string): number | null {
+    const records = this.state.attendance ?? []
+    if (records.length === 0) return null
+    const attended = records.filter((r) => r.presentMemberIds.includes(memberId)).length
+    return Math.round((attended / records.length) * 100)
+  }
+
   private memberSummary() {
     return (this.state.members ?? MEMBERS)
-      .map(
-        (m) =>
-          `- ${m.name}（${m.grade}・${m.role}、参加率${m.participationRate}%、参加不可: ${
-            m.unavailableDays.join('・') || 'なし'
-          }）メモ: ${m.memo || 'なし'}`
-      )
+      .map((m) => {
+        const rate = this.participationRate(m.id)
+        return `- ${m.name}（${m.grade}・${m.role}、${
+          rate === null ? '参加率不明' : `参加率${rate}%`
+        }、参加不可: ${m.unavailableDays.join('・') || 'なし'}）メモ: ${m.memo || 'なし'}`
+      })
       .join('\n')
   }
 
@@ -287,6 +337,11 @@ replyには相談への返答を書いてください。メンバーへの依頼
     const contacts = (this.state.contacts ?? []).map((c) => (c.id === contactId ? { ...c, styleNotes } : c))
     this.setState({ ...this.state, contacts })
     return contacts.find((c) => c.id === contactId)
+  }
+
+  @callable()
+  deleteContact(contactId: string) {
+    this.setState({ ...this.state, contacts: (this.state.contacts ?? []).filter((c) => c.id !== contactId) })
   }
 
   // --- プロジェクトとノート（文脈ストア） ---
@@ -600,19 +655,18 @@ missingInfoには、返事を書くうえで不足していて確認が必要な
     if (!routine) return
 
     for (const contactId of routine.contactIds) {
-      const contact = (this.state.contacts ?? []).find((c) => c.id === contactId)
-      if (!contact) continue
       try {
+        const recipient = this.resolveRecipient(contactId)
         await this.generateDraft(
           routine.projectId,
           contactId,
-          contact.defaultChannel,
+          recipient.defaultChannel,
           routine.situation,
           'routine',
           routine.name
         )
       } catch (e) {
-        console.error(`routine ${routine.name}: draft generation failed for ${contact.name}`, e)
+        console.error(`routine ${routine.name}: draft generation failed for ${contactId}`, e)
       }
     }
 
